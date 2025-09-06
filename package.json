@@ -1,0 +1,21 @@
+{
+  "name": "cubamodel-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot with web panel for CubaModel",
+  "main": "api/webhook.js",
+  "scripts": {
+    "dev": "cd web-panel && npm run dev",
+    "build": "cd web-panel && npm run build",
+    "start": "cd web-panel && npm start",
+    "test": "jest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.2",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "jest": "^29.7.0"
+  }
+}
