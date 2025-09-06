@@ -8,6 +8,7 @@ create table if not exists public.submission_drafts (
   model text,
   works_in_cuba boolean,
   bands text[],
+  provinces text[],
   observations text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()

@@ -8,9 +8,27 @@ const STEPS = [
   'awaiting_model',
   'awaiting_works',
   'awaiting_bands',
+  'awaiting_provinces',
   'awaiting_obs',
   'confirm'
 ];
+
+// Split with normalization (similar to SQL _split_norm function)
+function _splitNorm(txt) {
+  if (!txt || txt.trim() === '') return [];
+  
+  // Replace carriage returns and newlines with spaces
+  txt = txt.replace(/\r/g, ' ').replace(/\n/g, ' ');
+  
+  // Replace pipes and semicolons with commas
+  txt = txt.replace(/\|/g, ',').replace(/;/g, ',');
+  
+  // Split by comma or multiple spaces
+  const parts = txt.split(/[\s,]+/);
+  
+  // Trim each part and filter out empty strings
+  return parts.map(part => part.trim()).filter(part => part !== '');
+}
 
 async function getDraft(db, tgId) {
   const { data } = await db.from('submission_drafts').select('*').eq('tg_id', tgId).maybeSingle();
@@ -92,8 +110,14 @@ export async function handleWizardText(ctx) {
       return true;
     }
     case 'awaiting_bands': {
-      const bands = text.toLowerCase() === 'desconocido' ? [] : text.split(',').map(b => b.trim()).filter(Boolean);
-      await setDraft(ctx.db, tgId, { bands, step: 'awaiting_obs' });
+      const bands = text.toLowerCase() === 'desconocido' ? [] : _splitNorm(text);
+      await setDraft(ctx.db, tgId, { bands, step: 'awaiting_provinces' });
+      await ctx.reply('Indica las provincias separadas por coma (ej: La Habana, Santiago de Cuba) o escribe "-" para omitir.');
+      return true;
+    }
+    case 'awaiting_provinces': {
+      const provinces = text === '-' ? [] : _splitNorm(text);
+      await setDraft(ctx.db, tgId, { provinces, step: 'awaiting_obs' });
       await ctx.reply('Observaciones adicionales (opcional). Escribe "-" para omitir.');
       return true;
     }
@@ -106,7 +130,8 @@ export async function handleWizardText(ctx) {
         `Nombre: ${d.commercial_name}`,
         `Modelo: ${d.model}`,
         `¿Funciona?: ${d.works_in_cuba ? 'Sí' : 'No'}`,
-        `Bandas: ${(d.bands && d.bands.length) ? d.bands.join('|') : '—'}`,
+        `Bandas: ${(d.bands && d.bands.length) ? d.bands.join(', ') : '—'}`,
+        `Provincias: ${(d.provinces && d.provinces.length) ? d.provinces.join(', ') : '—'}`,
         `Obs: ${d.observations || '—'}`
       ].join('\n');
       await ctx.replyWithMarkdown(summary + '\n\nResponde "ok" para confirmar o "cancelar" para abortar.');
@@ -123,8 +148,8 @@ export async function handleWizardText(ctx) {
       const { error } = await ctx.db.from('phones').insert({
         commercial_name: d.commercial_name,
         model: d.model,
-        bands: d.bands || null,
-        provinces: null,
+        bands: d.bands || [],
+        provinces: d.provinces || [],
         status: 'pending',
         works_in_cuba: d.works_in_cuba,
         observations: d.observations,
