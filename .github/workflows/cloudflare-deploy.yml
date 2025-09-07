@@ -1,0 +1,51 @@
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy Bot to Cloudflare Workers
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            BOT_TOKEN
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            ADMIN_TG_IDS
+            ALLOWED_CHAT_IDS
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ADMIN_TG_IDS: ${{ secrets.ADMIN_TG_IDS }}
+          ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
+          
+      - name: Setup Webhook
+        run: |
+          # Wait a bit for deployment to be ready
+          sleep 30
+          # Configure webhook
+          WORKER_URL="https://cubamodel-bot.workers.dev"
+          curl -X GET "$WORKER_URL/setup-webhook" || echo "Webhook setup will be done manually"

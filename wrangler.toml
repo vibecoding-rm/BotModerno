@@ -1,19 +1,28 @@
-# Cloudflare Workers/Pages configuration
+# Cloudflare Workers configuration
 name = "cubamodel-bot"
-main = "functions/**"
+main = "src/worker.js"
 compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
 
-# Variables de entorno (las secretas se configuran por separado)
+# Node.js compatibility for Supabase and Telegraf
+node_compat = true
+
 [vars]
 NODE_ENV = "production"
 
-# Configuración para Pages Functions
-[build]
-command = "npm run build"
-cwd = "web-panel"
-destination = "web-panel/out"
+# Environment variables (secrets configured separately)
+# BOT_TOKEN = "secret"
+# SUPABASE_URL = "secret"
+# SUPABASE_SERVICE_ROLE_KEY = "secret"
+# ADMIN_TG_IDS = "secret"
+# ALLOWED_CHAT_IDS = "secret"
 
-# Routes para API functions
+# Routes for the worker
 [[routes]]
-pattern = "/api/*"
-custom_domain = true
+pattern = "cubamodel-bot.workers.dev/*"
+zone_name = ""
+
+# Custom domain routes (configure after deployment)
+# [[routes]]
+# pattern = "yourdomain.com/api/*"
+# zone_name = "yourdomain.com"
