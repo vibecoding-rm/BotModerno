@@ -26,10 +26,25 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const adminIds = (ADMIN_TG_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allowedChatIds = (ALLOWED_CHAT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 
-export function createBot() {
-  const bot = new Telegraf(BOT_TOKEN, { contextType: Telegraf.Context });
+export function createBot(envVars = null) {
+  // Si se pasan variables de entorno, usarlas (para Cloudflare)
+  const config = envVars || {
+    BOT_TOKEN,
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY,
+    ADMIN_TG_IDS,
+    ALLOWED_CHAT_IDS,
+  };
+  
+  const bot = new Telegraf(config.BOT_TOKEN, { contextType: Telegraf.Context });
+  
+  // Crear cliente Supabase con las variables correctas
+  const botSupabase = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false },
+  });
+  
   // Attach clients
-  bot.context.db = supabase;
+  bot.context.db = botSupabase;
 
   bot.start(async (ctx) => {
     await ctx.reply(
@@ -72,12 +87,37 @@ Comandos:
     }
   });
 
-  // /revisar can run in group with short answer
+  // /revisar SOLO funciona en grupos, no en DM
   bot.command('revisar', async (ctx) => {
-    if (ctx.chat?.type !== 'private') {
-      return ctx.reply('Te envío detalles por DM. Escríbeme: @' + (ctx.botInfo?.username || 'este_bot'));
+    if (ctx.chat?.type === 'private') {
+      return ctx.reply('El comando /revisar solo funciona en grupos. Aquí en DM puedes usar /subir para agregar un teléfono.');
     }
-    await ctx.reply('Próximamente: revisión por DM. Por ahora usa el panel web.');
+    
+    // Funcionalidad de revisar en grupo - mostrar algunos teléfonos recientes
+    try {
+      const { data: phones } = await ctx.db
+        .from('phones')
+        .select('id, commercial_name, model, works_in_cuba, status')
+        .eq('status', 'approved')
+        .order('id', { ascending: false })
+        .limit(5);
+        
+      if (!phones || phones.length === 0) {
+        return ctx.reply('📱 Aún no hay teléfonos aprobados en la base de datos.');
+      }
+      
+      let message = '📱 *Últimos teléfonos verificados:*\n\n';
+      phones.forEach(phone => {
+        const status = phone.works_in_cuba ? '✅ Funciona' : '❌ No funciona';
+        message += `• ${phone.commercial_name} (${phone.model || 'N/A'}) - ${status}\n`;
+      });
+      message += '\n💻 Ver más detalles en el panel web o usa /subir por DM para agregar uno.';
+      
+      await ctx.reply(message, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.error('Error in revisar command:', error);
+      await ctx.reply('⚠️ Error al consultar la base de datos. Intenta de nuevo.');
+    }
   });
 
   bot.command('reportar', async (ctx) => handleReport(ctx));

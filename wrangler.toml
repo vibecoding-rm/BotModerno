@@ -1,0 +1,19 @@
+# Cloudflare Workers/Pages configuration
+name = "cubamodel-bot"
+main = "functions/**"
+compatibility_date = "2024-09-01"
+
+# Variables de entorno (las secretas se configuran por separado)
+[vars]
+NODE_ENV = "production"
+
+# Configuración para Pages Functions
+[build]
+command = "npm run build"
+cwd = "web-panel"
+destination = "web-panel/out"
+
+# Routes para API functions
+[[routes]]
+pattern = "/api/*"
+custom_domain = true

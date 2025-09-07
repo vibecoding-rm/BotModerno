@@ -1,14 +1,16 @@
 {
   "name": "cubamodel-bot",
   "version": "1.0.0",
-  "description": "Telegram bot with web panel for CubaModel",
-  "main": "api/webhook.js",
+  "description": "Telegram bot with web panel for CubaModel - Cloudflare deployment",
+  "main": "functions/api/webhook.js",
+  "type": "module",
   "scripts": {
     "dev": "cd web-panel && npm run dev",
-    "build": "cd web-panel && npm run build",
+    "build": "cd web-panel && npm run build:cloudflare",
     "start": "cd web-panel && npm start",
     "test": "jest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "deploy": "cd web-panel && npm run build:cloudflare"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.2",
