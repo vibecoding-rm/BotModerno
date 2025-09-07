@@ -1,3 +1,4 @@
+# Forzar redeploy en Vercel: commit automático
 # BotModerno — Panel + Webhook (Vercel + Supabase)
 Generado: 2025-09-06T22:13:36
 
