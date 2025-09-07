@@ -33,6 +33,21 @@ async function handleUpdate(update, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // Expose basic endpoints before secret validation so health checks work
+    if (request.method === 'GET' && url.pathname === '/') {
+      return new Response('OK CubaModel Bot Worker', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
+    }
+    if (request.method === 'GET' && url.pathname === '/health') {
+      return new Response(JSON.stringify({ ok: true, version: '1.0.0' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     const expectedSecret = env.TG_WEBHOOK_SECRET;
     if (!expectedSecret) {
       return new Response('Misconfigured: TG_WEBHOOK_SECRET', { status: 500 });
@@ -53,11 +68,13 @@ export default {
       return new Response('Not found', { status: 404 });
     }
 
-    if (request.method === 'GET' && url.pathname === '/health') {
-      return new Response(JSON.stringify({ ok: true, version: '1.0.0' }), { status: 200 });
-    }
-
     if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
+
+    // Content-Type guard before parsing body
+    const contentType = (request.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) {
+      return new Response('Bad Request', { status: 400 });
+    }
 
     // A partir de aquí el request es válido y viene de Telegram
     let update;
@@ -76,10 +93,11 @@ export default {
     } catch (e) {
       // Si el insert rompió unique constraint (duplicado), respondemos 200 para que Telegram no reintente
       if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
-        await logEvent(env, 'duplicate', { reason: 'fingerprint', update_id: update.update_id });
+        // log in background; don't block response
+        ctx.waitUntil(logEvent(env, 'duplicate', { reason: 'fingerprint', update_id: update?.update_id }));
         return new Response('OK', { status: 200 });
       }
-      await logEvent(env, 'error', { where: 'handleUpdate', error: String(e) });
+      ctx.waitUntil(logEvent(env, 'error', { where: 'handleUpdate', error: String(e) }));
       return new Response('OK', { status: 200 });
     }
   }

@@ -9,6 +9,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { logger } from './logger.js';
+import { validate, phoneSubmissionSchema } from './validation.js';
 
 // Utility: safe JSON fetch wrapper for Telegram API
 async function tgFetch(token, method, payload) {
@@ -487,20 +488,30 @@ export class SimpleTelegramBot {
     const bands = Array.isArray(d.bands) ? d.bands : splitNormList(d.bands);
     const provinces = Array.isArray(d.provinces) ? d.provinces : splitNormList(d.provinces);
 
+    const payload = {
+      commercial_name: d.commercial_name,
+      model: modelUpper,
+      works: !!d.works,
+      bands: bands || [],
+      provinces: provinces || [],
+      observations: d.observations || null,
+    };
+
+    // Validate submission server-side before inserting
+    const validation = validate(phoneSubmissionSchema, payload);
+    if (!validation.success) {
+      logger.error('submitPhone invalid payload', null, { userId, chatId, errors: validation.error });
+      await this.sendMessage(chatId, 'Datos inválidos en la propuesta. Intenta de nuevo o /cancelar.');
+      return;
+    }
+
     const { error } = await this.supabase
       .from('phones')
-      .insert({
-        commercial_name: d.commercial_name,
-        model: modelUpper,
-        works: !!d.works,
-        bands: bands || [],
-        provinces: provinces || [],
-        observations: d.observations || null,
-        created_at: new Date().toISOString()
-      });
+      .insert({ ...payload, created_at: new Date().toISOString() });
 
     if (error) {
       if (String(error).includes('duplicate key value') || String(error).includes('unique constraint')) {
+        // Let upper layer handle duplicate specially by throwing
         throw error;
       } else {
         logger.error('submitPhone error', error, { userId, chatId });
