@@ -1,4 +1,0 @@
-# Cloudflare Pages - Redirects
-/api/webhook /api/webhook 200
-/api/status /api/status 200
-/api/setup-webhook /api/setup-webhook 200
