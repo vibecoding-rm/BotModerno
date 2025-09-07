@@ -130,7 +130,11 @@ export class SimpleTelegramBot {
         await this.onCallback(update.callback_query);
       }
     } catch (e) {
-      logger.error('handleUpdate error', e);
+      if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
+        throw e;
+      } else {
+        logger.error('handleUpdate error', e);
+      }
     }
   }
 
@@ -476,38 +480,37 @@ export class SimpleTelegramBot {
   }
 
   async submitPhone(userId, chatId) {
-    try {
-      const d = await this.getDraft(userId);
-      if (!d) return;
+    const d = await this.getDraft(userId);
+    if (!d) return;
 
-      const modelUpper = toUpperModel(d.model);
-      const bands = Array.isArray(d.bands) ? d.bands : splitNormList(d.bands);
-      const provinces = Array.isArray(d.provinces) ? d.provinces : splitNormList(d.provinces);
+    const modelUpper = toUpperModel(d.model);
+    const bands = Array.isArray(d.bands) ? d.bands : splitNormList(d.bands);
+    const provinces = Array.isArray(d.provinces) ? d.provinces : splitNormList(d.provinces);
 
-      const { error } = await this.supabase
-        .from('phones')
-        .insert({
-          commercial_name: d.commercial_name,
-          model: modelUpper,
-          works: !!d.works,
-          bands: bands || [],
-          provinces: provinces || [],
-          observations: d.observations || null,
-          created_at: new Date().toISOString()
-        });
+    const { error } = await this.supabase
+      .from('phones')
+      .insert({
+        commercial_name: d.commercial_name,
+        model: modelUpper,
+        works: !!d.works,
+        bands: bands || [],
+        provinces: provinces || [],
+        observations: d.observations || null,
+        created_at: new Date().toISOString()
+      });
 
-      await this.clearDraft(userId);
-
-      if (error) {
+    if (error) {
+      if (String(error).includes('duplicate key value') || String(error).includes('unique constraint')) {
+        throw error;
+      } else {
         logger.error('submitPhone error', error, { userId, chatId });
         await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
-      } else {
-        await this.sendMessage(chatId, '¡Hecho! Quedó guardado. ✅');
+        return;
       }
-    } catch (e) {
-      logger.error('submitPhone fatal', e, { userId, chatId });
-      await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
     }
+
+    await this.clearDraft(userId);
+    await this.sendMessage(chatId, '¡Hecho! Quedó guardado. ✅');
   }
 
   async handleReport(chatId, userId, text, username) {

@@ -1,3 +1,4 @@
+
 /* src/worker.js
  * Cloudflare Worker main entry point (Workers runtime)
  * Unificado para manejar el webhook de Telegram sin Telegraf.
@@ -10,80 +11,76 @@
 import { SimpleTelegramBot } from './bot-simple.js';
 import { validate, telegramUpdateSchema } from './validation.js';
 import { logger } from './logger.js';
+import { logEvent } from './lib/events.js';
+async function handleUpdate(update, env) {
+  const botEnv = {
+    BOT_TOKEN: env.BOT_TOKEN,
+    SUPABASE_URL: env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+    ADMIN_TG_IDS: env.ADMIN_TG_IDS,
+    ALLOWED_CHAT_IDS: env.ALLOWED_CHAT_IDS,
+  };
+  const bot = new SimpleTelegramBot(botEnv);
+  const validation = validate(telegramUpdateSchema, update);
+  if (!validation.success) {
+    logger.error('Invalid update payload', null, { errors: validation.error });
+    return;
+  }
+  await bot.handleUpdate(validation.data);
+}
+
 
 export default {
-  async fetch(request, env) {
-    try {
-      const url = new URL(request.url);
-      const pathname = url.pathname;
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const expectedSecret = env.TG_WEBHOOK_SECRET;
+    if (!expectedSecret) {
+      return new Response('Misconfigured: TG_WEBHOOK_SECRET', { status: 500 });
+    }
 
-      // GET /
-      if (request.method === 'GET' && pathname === '/') {
-        return new Response('OK CubaModel Bot Worker', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-        });
-      }
-
-      // POST /webhook/<secret>
-      if (request.method === 'POST' && pathname.startsWith('/webhook/')) {
-        const parts = pathname.split('/').filter(Boolean); // ["webhook", "<secret>"]
-        const providedSecret = parts[1] || '';
-        const expectedSecret = env.TG_WEBHOOK_SECRET || '';
-
-        if (!expectedSecret || providedSecret !== expectedSecret) {
-          // No revelar si existe o no
-          return new Response('Not found', { status: 404 });
-        }
-
-        // Config env para el bot (solo lo necesario)
-        const botEnv = {
-          BOT_TOKEN: env.BOT_TOKEN,
-          SUPABASE_URL: env.SUPABASE_URL,
-          SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-          ADMIN_TG_IDS: env.ADMIN_TG_IDS,
-          ALLOWED_CHAT_IDS: env.ALLOWED_CHAT_IDS,
-        };
-
-        const bot = new SimpleTelegramBot(botEnv);
-
-        try {
-          const update = await request.json();
-          const validation = validate(telegramUpdateSchema, update);
-          if (!validation.success) {
-            logger.error('Invalid update payload', null, { errors: validation.error });
-            return new Response(JSON.stringify({ ok: true }), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' }
-            });
-          }
-          await bot.handleUpdate(validation.data);
-        } catch (err) {
-          // Loguear pero SIEMPRE responder 200 para que Telegram no reintente
-          logger.error('Webhook processing error', err);
-        }
-
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-      // 404 por defecto
+    // 1) Validación por ruta: /webhook/<secret>
+    const pathParts = url.pathname.split('/').filter(Boolean); // e.g. ["webhook", "<secret>"]
+    const pathSecret = pathParts[1] || '';
+    if (!(pathParts[0] === 'webhook' && pathSecret === expectedSecret)) {
+      // Evita filtrar información: 404
       return new Response('Not found', { status: 404 });
+    }
+
+    // 2) Validación por header oficial de Telegram
+    // Telegram enviará X-Telegram-Bot-Api-Secret-Token si lo seteaste en setWebhook
+    const headerSecret = request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '';
+    if (headerSecret !== expectedSecret) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/health') {
+      return new Response(JSON.stringify({ ok: true, version: '1.0.0' }), { status: 200 });
+    }
+
+    if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
+
+    // A partir de aquí el request es válido y viene de Telegram
+    let update;
+    try {
+      update = await request.json();
+    } catch {
+      return new Response('Bad Request', { status: 400 });
+    }
+
+    // TODO: aquí estaba tu lógica actual del bot…
+
+    // Ejemplo de manejo de inserción con “fingerprint” única:
+    try {
+      await handleUpdate(update, env); // tu función existente
+      return new Response('OK', { status: 200 });
     } catch (e) {
-      // Fallback: nunca caer; responder 200 en caso de POST webhook; 500 para otros
-      try {
-        const url = new URL(request.url);
-        if (request.method === 'POST' && url.pathname.startsWith('/webhook/')) {
-          logger.error('Fatal webhook error', e);
-          return new Response(JSON.stringify({ ok: true }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-      } catch {}
-      return new Response('Internal error', { status: 500 });
+      // Si el insert rompió unique constraint (duplicado), respondemos 200 para que Telegram no reintente
+      if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
+        await logEvent(env, 'duplicate', { reason: 'fingerprint', update_id: update.update_id });
+        return new Response('OK', { status: 200 });
+      }
+      await logEvent(env, 'error', { where: 'handleUpdate', error: String(e) });
+      return new Response('OK', { status: 200 });
     }
   }
-};
+}
