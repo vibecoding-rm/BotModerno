@@ -1,11 +1,8 @@
 # Cloudflare Workers configuration
 name = "cubamodel-bot"
 main = "src/worker.js"
-compatibility_date = "2024-09-01"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
-
-# Node.js compatibility for Supabase and Telegraf
-node_compat = true
 
 [vars]
 NODE_ENV = "production"

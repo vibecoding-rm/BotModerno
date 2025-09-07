@@ -3,7 +3,7 @@
  * Handles Telegram webhook and bot functionality
  */
 
-import { createBot } from './registerBot.js';
+import { SimpleTelegramBot } from './bot-simple.js';
 
 // Cloudflare Worker environment
 export default {
@@ -47,7 +47,7 @@ async function handleWebhook(request, env) {
       return new Response('Method not allowed', { status: 405 });
     }
     
-    const bot = createBot(env);
+    const bot = new SimpleTelegramBot(env);
     const body = await request.json();
     
     // Process the update
