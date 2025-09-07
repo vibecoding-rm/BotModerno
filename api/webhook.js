@@ -1,5 +1,6 @@
 /* api/webhook.js
  * Vercel serverless entry for Telegram webhook
+ * Nota: solo para Vercel; no usado por Cloudflare Workers.
  */
 import { createBot } from '../src/registerBot.js';
 

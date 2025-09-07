@@ -1,25 +1,15 @@
 # Cloudflare Workers configuration
 name = "cubamodel-bot"
 main = "src/worker.js"
-compatibility_date = "2024-09-23"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2024-08-20"
+
+# Secrets managed with `wrangler secret put ...`:
+# - BOT_TOKEN (Telegram)
+# - SUPABASE_URL
+# - SUPABASE_SERVICE_ROLE_KEY (service role; only in Worker)
+# - TG_WEBHOOK_SECRET (random long string)
+# - ADMIN_TG_IDS (csv)
+# - ALLOWED_CHAT_IDS (csv, optional)
 
 [vars]
 NODE_ENV = "production"
-
-# Environment variables (secrets configured separately)
-# BOT_TOKEN = "secret"
-# SUPABASE_URL = "secret"
-# SUPABASE_SERVICE_ROLE_KEY = "secret"
-# ADMIN_TG_IDS = "secret"
-# ALLOWED_CHAT_IDS = "secret"
-
-# Routes for the worker
-[[routes]]
-pattern = "cubamodel-bot.workers.dev/*"
-zone_name = ""
-
-# Custom domain routes (configure after deployment)
-# [[routes]]
-# pattern = "yourdomain.com/api/*"
-# zone_name = "yourdomain.com"
