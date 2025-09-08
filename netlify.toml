@@ -1,0 +1,19 @@
+[build]
+# Build from the web-panel subdirectory (monorepo-style)
+base = "web-panel"
+command = "npm ci && npm run build"
+publish = ".next"
+
+[build.environment]
+NODE_VERSION = "18"
+
+[dev]
+# Local dev server settings (optional)
+framework = "next"
+command = "npm run dev"
+targetPort = 5000
+
+[[plugins]]
+package = "@netlify/plugin-nextjs"
+
+

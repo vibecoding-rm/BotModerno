@@ -128,4 +128,4 @@ temp/
 .vscode/
 .idea/
 *.swp
-*.swo
+*.swoweb-panel/.env.local
