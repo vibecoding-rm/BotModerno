@@ -542,49 +542,91 @@ export class SimpleTelegramBot {
   }
 
   async sendRules(userId, chatId, chatType) {
-    const rules =
-      '📜 Reglas:\n' +
-      '1) Respeto; nada de insultos ni spam.\n' +
-      '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
-      '3) Aporta datos reales con /subir.\n' +
-      '4) Usa /reportar <id> texto para avisar de errores.\n' +
-      '5) La base es de todos, nadie puede privatizarla.';
+    try {
+      // Get rules from database
+      const { data } = await this.supabase
+        .from('bot_config')
+        .select('rules')
+        .single();
 
-    const transparency =
-      '🔎 Transparencia:\n' +
-      'Este proyecto nació porque antes intentaron cobrar por una base hecha por la comunidad.\n' +
-      'Aquí todo es abierto y descargable; hecho con pocos recursos, puede ir lento o fallar a veces.';
+      const rules = data?.rules || 
+        '📜 Reglas:\n' +
+        '1) Respeto; nada de insultos ni spam.\n' +
+        '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
+        '3) Aporta datos reales con /subir.\n' +
+        '4) Usa /reportar para avisar de errores.\n' +
+        '5) La base es de todos, nadie puede privatizarla.';
 
-    const text = `${rules}\n\n${transparency}`;
-
-    if (chatType === 'private') {
-      await this.sendMessage(userId, text);
-    } else {
-      await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
-      await this.sendMessage(userId, text);
+      if (chatType === 'private') {
+        await this.sendMessage(userId, rules);
+      } else {
+        await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
+        await this.sendMessage(userId, rules);
+      }
+    } catch (error) {
+      logger.error('Error fetching rules from database', error);
+      // Fallback to default rules
+      const defaultRules = '📜 Reglas:\n1) Respeto; nada de insultos ni spam.\n2) No ventas, solo compatibilidad de teléfonos en Cuba.\n3) Aporta datos reales con /subir.\n4) Usa /reportar para avisar de errores.\n5) La base es de todos, nadie puede privatizarla.';
+      if (chatType === 'private') {
+        await this.sendMessage(userId, defaultRules);
+      } else {
+        await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
+        await this.sendMessage(userId, defaultRules);
+      }
     }
   }
 
   async welcomeUserDM(user, chat) {
-    const fullname = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.username || 'amigo';
-    const msg =
-      `👋 ¡Bienvenido ${fullname} a CubaModel! 🇨🇺📱\n\n` +
-      'Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.\n' +
-      'Aquí todo es distinto: la información será siempre abierta y descargable.\n\n' +
-      '⚠️ Limitaciones:\n' +
-      '• Puede ir lento en horas pico.\n' +
-      '• Hay topes de consultas y almacenamiento.\n' +
-      '• Puede caerse o fallar a veces (fase de desarrollo).\n\n' +
-      '📜 Reglas:\n' +
-      '1) Respeto; nada de insultos ni spam.\n' +
-      '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
-      '3) Aporta datos reales con /subir.\n' +
-      '4) Usa /reportar <id> texto para avisar de errores.\n' +
-      '5) La base es de todos, nadie puede privatizarla.\n\n' +
-      'Gracias por sumarte. Esto es de todos y para todos. ✨';
+    try {
+      // Get welcome message from database
+      const { data } = await this.supabase
+        .from('bot_config')
+        .select('welcome')
+        .single();
 
-    // Try DM; if user has blocked bot, ignore
-    await this.sendMessage(user.id, msg);
+      let msg = data?.welcome;
+      
+      if (!msg) {
+        // Fallback to default welcome message
+        const fullname = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.username || 'amigo';
+        msg = `👋 ¡Bienvenido ${fullname} a CubaModel! 🇨🇺📱\n\n` +
+          'Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.\n' +
+          'Aquí todo es distinto: la información será siempre abierta y descargable.\n\n' +
+          '⚠️ Limitaciones:\n' +
+          '• Puede ir lento en horas pico.\n' +
+          '• Hay topes de consultas y almacenamiento.\n' +
+          '• Puede caerse o fallar a veces (fase de desarrollo).\n\n' +
+          '📜 Reglas:\n' +
+          '1) Respeto; nada de insultos ni spam.\n' +
+          '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
+          '3) Aporta datos reales con /subir.\n' +
+          '4) Usa /reportar para avisar de errores.\n' +
+          '5) La base es de todos, nadie puede privatizarla.\n\n' +
+          'Gracias por sumarte. Esto es de todos y para todos. ✨';
+      } else {
+        // Replace variables in welcome message
+        const fullname = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.username || 'amigo';
+        const username = user.username ? `@${user.username}` : 'usuario';
+        const chatTitle = chat.title || 'CubaModel';
+        
+        msg = msg
+          .replace(/{fullname}/g, fullname)
+          .replace(/{username}/g, username)
+          .replace(/{chat_title}/g, chatTitle);
+      }
+
+      // Try DM; if user has blocked bot, ignore
+      await this.sendMessage(user.id, msg);
+    } catch (error) {
+      logger.error('Error fetching welcome message from database', error);
+      // Fallback to default welcome
+      const fullname = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.username || 'amigo';
+      const defaultMsg = `👋 ¡Bienvenido ${fullname} a CubaModel! 🇨🇺📱\n\n` +
+        'Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.\n' +
+        'Aquí todo es distinto: la información será siempre abierta y descargable.\n\n' +
+        'Gracias por sumarte. Esto es de todos y para todos. ✨';
+      await this.sendMessage(user.id, defaultMsg);
+    }
   }
 
   // --- Captcha with Vercel KV (REST) ---
