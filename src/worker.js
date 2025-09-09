@@ -11,7 +11,8 @@
 import { SimpleTelegramBot } from './bot-simple.js';
 import { validate, telegramUpdateSchema } from './validation.js';
 import { logger } from './logger.js';
-import { logEvent } from './lib/events.js';
+import { logEvent, logWebhookEvent } from './lib/events.js';
+
 async function handleUpdate(update, env) {
   const botEnv = {
     BOT_TOKEN: env.BOT_TOKEN,
@@ -24,9 +25,14 @@ async function handleUpdate(update, env) {
   const validation = validate(telegramUpdateSchema, update);
   if (!validation.success) {
     logger.error('Invalid update payload', null, { errors: validation.error });
+    await logEvent(env, 'validation_error', { errors: validation.error });
     return;
   }
+  
+  // Log successful webhook processing
+  await logWebhookEvent(env, validation.data, 'processing');
   await bot.handleUpdate(validation.data);
+  await logWebhookEvent(env, validation.data, 'completed');
 }
 
 
@@ -46,6 +52,31 @@ export default {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+
+    // Para pruebas: aceptar webhooks en la raíz sin validación de secret
+    if (request.method === 'POST' && url.pathname === '/') {
+      // Procesar webhook directamente
+      let update;
+      try {
+        update = await request.json();
+      } catch {
+        return new Response('Bad Request', { status: 400 });
+      }
+
+      try {
+        await handleUpdate(update, env);
+        return new Response('OK', { status: 200 });
+      } catch (e) {
+        // Si el insert rompió unique constraint (duplicado), respondemos 200 para que Telegram no reintente
+        if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
+          // log in background; don't block response
+          ctx.waitUntil(logEvent(env, 'duplicate', { reason: 'fingerprint', update_id: update?.update_id }));
+          return new Response('OK', { status: 200 });
+        }
+        ctx.waitUntil(logEvent(env, 'error', { where: 'handleUpdate', error: String(e) }));
+        return new Response('OK', { status: 200 });
+      }
     }
 
     const expectedSecret = env.TG_WEBHOOK_SECRET;

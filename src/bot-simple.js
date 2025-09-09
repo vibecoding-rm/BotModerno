@@ -205,32 +205,67 @@ export class SimpleTelegramBot {
     const argStr = args.join(' ').trim();
     switch (cmd.toLowerCase()) {
       case '/start': {
-        await this.sendMessage(chatId,
-          '¡Asere! Soy Bandín 📶. Usa /subir en DM pa\' proponer modelos y /revisar en el grupo.\n\n' +
-          'Comandos:\n' +
-          '• /subir — Asistente (solo por DM)\n' +
-          '• /revisar <modelo> — Buscar por modelo (solo en grupos)\n' +
-          '• /reportar <texto> — Reportar algo sobre el último resultado\n' +
-          '• /suscribir — Alta de notificaciones\n' +
-          '• /cancelarsub — Baja de notificaciones\n' +
-          '• /id — Ver tus IDs\n' +
-          '• /reglas — Reglas y transparencia del proyecto\n' +
-          '• /cancelar — Cancelar asistente\n'
-        );
+        await this.sendWelcomeMessage(chatId, userId, chatType);
         break;
       }
       case '/id': {
-        const who = `chat_id: ${chatId}\nuser_id: ${userId}`;
-        await this.sendMessage(chatId, '🆔 IDs:\n' + who);
+        const isAdmin = this.adminIds.includes(String(userId));
+        const user = msg.from;
+        const chat = msg.chat;
+        
+        let response = '🆔 **Información de IDs**\n\n';
+        response += `👤 **Usuario:**\n`;
+        response += `• ID: \`${userId}\`\n`;
+        response += `• Nombre: ${user.first_name || 'N/A'}\n`;
+        response += `• Username: @${user.username || 'N/A'}\n`;
+        response += `• Apellido: ${user.last_name || 'N/A'}\n\n`;
+        
+        response += `💬 **Chat:**\n`;
+        response += `• ID: \`${chatId}\`\n`;
+        response += `• Tipo: ${chatType}\n`;
+        response += `• Título: ${chat.title || 'N/A'}\n`;
+        
+        if (isAdmin) {
+          response += `\n🔧 **Info de Admin:**\n`;
+          response += `• Es admin: ✅ Sí\n`;
+          response += `• Timestamp: ${new Date().toISOString()}\n`;
+        }
+        
+        await this.sendMessage(chatId, response);
         break;
       }
       case '/reglas': {
         await this.sendRules(userId, chatId, chatType);
         break;
       }
+      case '/fijar': {
+        // Solo admins pueden fijar reglas
+        if (!this.adminIds.includes(String(userId))) {
+          await this.sendMessage(chatId, '❌ Solo los administradores pueden usar este comando.');
+          return;
+        }
+        
+        if (chatType === 'private') {
+          await this.sendMessage(chatId, 'Este comando solo funciona en grupos.');
+          return;
+        }
+        
+        const shortRules = this.getShortRules();
+        await this.sendMessage(chatId, shortRules);
+        break;
+      }
+
+      case '/exportar': {
+        if (chatType === 'private') {
+          await this.sendExportOptions(chatId);
+        } else {
+          await this.sendMessage(chatId, '📥 Para exportar la base de datos, escríbeme por DM y usa /exportar.');
+        }
+        break;
+      }
       case '/subir': {
         if (chatType !== 'private') {
-          await this.sendMessage(chatId, 'En el grupo es /revisar. Escríbeme por DM pa\' /subir.');
+          await this.sendMessage(chatId, '💬 Para agregar un teléfono, escríbeme por DM y usa /subir ahí.');
         } else {
           await this.startWizard(chatId, userId);
         }
@@ -238,11 +273,11 @@ export class SimpleTelegramBot {
       }
       case '/revisar': {
         if (chatType === 'private') {
-          await this.sendMessage(chatId, 'El comando /revisar es solo en grupos; usa /subir aquí en DM.');
+          await this.sendMessage(chatId, '🔍 El comando /revisar funciona solo en grupos. Aquí en DM usa /subir para agregar teléfonos.');
           return;
         }
         if (!argStr) {
-          await this.sendMessage(chatId, 'Formato: /revisar <modelo>. Escribe el modelo exacto o parcial.');
+          await this.sendMessage(chatId, '📝 Formato: /revisar <modelo>\n\nEjemplo: /revisar Samsung A14');
           return;
         }
         await this.searchByModel(chatId, argStr);
@@ -386,7 +421,7 @@ export class SimpleTelegramBot {
           }
           if (yn) {
             await this.setDraft(userId, { works: true, step: 'awaiting_bands' });
-            await this.sendMessage(chatId, 'Indica las bandas separadas por coma (ej: B3,B7,B28) o escribe "desconocido".', { reply_markup: kbBackCancel() });
+            await this.sendMessage(chatId, 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', { reply_markup: kbBackCancel() });
           } else {
             await this.setDraft(userId, { works: false, step: 'awaiting_obs' });
             await this.sendMessage(chatId, 'Añade observaciones (ej: "sin señal 4G en Holguín").', { reply_markup: kbBackCancel() });
@@ -453,6 +488,45 @@ export class SimpleTelegramBot {
       const userId = cb.from?.id;
       if (!chatId || !userId) return;
 
+      // Export buttons
+      if (data.startsWith('export:')) {
+        await this.answerCallbackQuery(id);
+        const format = data.split(':')[1];
+        await this.handleExportCallback(chatId, userId, format);
+        return;
+      }
+
+      // Welcome buttons
+      if (data.startsWith('welcome:')) {
+        await this.answerCallbackQuery(id);
+        const action = data.split(':')[1];
+        
+        switch (action) {
+          case 'add_phone':
+            await this.startWizard(chatId, userId);
+            break;
+          case 'search':
+            await this.sendMessage(chatId, '🔍 Para buscar teléfonos, usa el comando /revisar en el grupo o escribe el modelo que buscas.');
+            break;
+          case 'rules':
+            await this.sendRules(userId, chatId, 'private');
+            break;
+          case 'stats':
+            await this.sendStats(chatId);
+            break;
+          case 'export':
+            await this.sendExportOptions(chatId);
+            break;
+          case 'help':
+            await this.sendHelp(chatId);
+            break;
+          case 'back':
+            await this.sendWelcomeMessage(chatId, userId, 'private');
+            break;
+        }
+        return;
+      }
+
       // Captcha buttons
       if (data.startsWith('cap:')) {
         await this.answerCallbackQuery(id);
@@ -463,13 +537,14 @@ export class SimpleTelegramBot {
         if (uId !== userId) return; // ignore others
         if (kind === 'ok') {
           await this.kvDel(`captcha:${cId}:${uId}`);
-          await this.sendMessage(userId, '✅ Verificación completada. ¡Bienvenido!');
+          await this.sendMessage(userId, '✅ ¡Verificación completada! Ahora puedes participar en el grupo.');
           await this.sendRules(userId, cId, 'private');
         } else {
-          // Kick user from group
+          // Expulsar usuario del grupo
           await tgFetch(this.token, 'banChatMember', { chat_id: cId, user_id: uId });
-          await tgFetch(this.token, 'unbanChatMember', { chat_id: cId, user_id: uId }); // immediate unban so pueda volver a intentar
+          await tgFetch(this.token, 'unbanChatMember', { chat_id: cId, user_id: uId }); // unban inmediato para que pueda volver a intentar
           await this.kvDel(`captcha:${cId}:${uId}`);
+          await this.sendMessage(userId, '❌ Has sido expulsado por no completar la verificación. Puedes volver a unirte al grupo.');
         }
         return;
       }
@@ -511,7 +586,7 @@ export class SimpleTelegramBot {
             await this.sendMessage(chatId, '¿Funciona en Cuba? Responde "sí" o "no".', { reply_markup: kbBackCancel() });
             break;
           case 'awaiting_bands':
-            await this.sendMessage(chatId, 'Bandas separadas por coma (ej: B3,B7,B28) o "desconocido".', { reply_markup: kbBackCancel() });
+            await this.sendMessage(chatId, 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', { reply_markup: kbBackCancel() });
             break;
           case 'awaiting_provinces':
             await this.sendMessage(chatId, 'Provincias separadas por coma o "-" para omitir.', { reply_markup: kbBackCancel() });
@@ -539,6 +614,117 @@ export class SimpleTelegramBot {
     await tgFetch(this.token, 'approveChatJoinRequest', { chat_id: chat.id, user_id: user.id });
     await this.welcomeUserDM(user, chat);
     await this.startCaptcha(user, chat);
+  }
+
+  async sendWelcomeMessage(chatId, userId, chatType) {
+    try {
+      // Get welcome message from database
+      const { data } = await this.supabase
+        .from('bot_config')
+        .select('welcome')
+        .single();
+
+      let welcomeMessage = data?.welcome;
+      
+      if (!welcomeMessage) {
+        // Fallback to default welcome message
+        welcomeMessage = `🎉 *¡BIENVENIDO A CUBAMODEL!* 🇨🇺📱
+
+🌟 *Base de Datos Abierta para Teléfonos en Cuba*
+
+Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.
+
+✨ Aquí todo es distinto: la información será _SIEMPRE_ abierta y descargable.
+
+⚠️ *LIMITACIONES ACTUALES:*
+• Puede ir lento en horas pico
+• Hay topes de consultas
+• Puede fallar (fase desarrollo)
+
+💫 Gracias por sumarte. 
+Esto es de todos y para todos. ✨`;
+      }
+
+      // Replace {fullname} placeholder if user info is available
+      if (welcomeMessage.includes('{fullname}')) {
+        // For now, we'll use a generic greeting since we don't have user info in this context
+        welcomeMessage = welcomeMessage.replace('{fullname}', 'usuario');
+      }
+
+      // Create inline keyboard for welcome message
+      const welcomeKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '📱 Agregar Teléfono', callback_data: 'welcome:add_phone' },
+            { text: '🔍 Buscar Teléfonos', callback_data: 'welcome:search' }
+          ],
+          [
+            { text: '📜 Ver Reglas', callback_data: 'welcome:rules' },
+            { text: '📊 Ver Estadísticas', callback_data: 'welcome:stats' }
+          ],
+          [
+            { text: '📥 Exportar Base', callback_data: 'welcome:export' },
+            { text: '❓ Ayuda', callback_data: 'welcome:help' }
+          ]
+        ]
+      };
+
+      if (chatType === 'private') {
+        await this.sendMessage(chatId, welcomeMessage, { reply_markup: welcomeKeyboard });
+      } else {
+        await this.sendMessage(chatId, 'Te envié el mensaje de bienvenida por DM. 📩');
+        await this.sendMessage(userId, welcomeMessage, { reply_markup: welcomeKeyboard });
+      }
+    } catch (error) {
+      logger.error('Error fetching welcome message from database', error);
+      // Fallback to default welcome message
+      const defaultWelcome = `🎉 *¡BIENVENIDO A CUBAMODEL!* 🇨🇺📱
+
+🌟 *Base de Datos Abierta para Teléfonos en Cuba*
+
+Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.
+
+✨ Aquí todo es distinto: la información será _SIEMPRE_ abierta y descargable.
+
+💫 Gracias por sumarte. 
+Esto es de todos y para todos. ✨`;
+
+      const defaultRulesAndCommands = `📜 *NUESTRAS REGLAS:*
+1️⃣ Respeto; nada de insultos
+2️⃣ No ventas, solo compatibilidad
+3️⃣ Aporta datos reales con /subir
+4️⃣ Usa /reportar para errores
+5️⃣ La base es de todos
+
+🇨🇺 ¡Vamos a hacer la mejor base de datos 
+de compatibilidad de teléfonos en Cuba! 🇨🇺`;
+      
+      const welcomeKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '📱 Agregar Teléfono', callback_data: 'welcome:add_phone' },
+            { text: '🔍 Buscar Teléfonos', callback_data: 'welcome:search' }
+          ],
+          [
+            { text: '📜 Ver Reglas', callback_data: 'welcome:rules' },
+            { text: '📊 Ver Estadísticas', callback_data: 'welcome:stats' }
+          ],
+          [
+            { text: '📥 Exportar Base', callback_data: 'welcome:export' },
+            { text: '❓ Ayuda', callback_data: 'welcome:help' }
+          ]
+        ]
+      };
+      
+      if (chatType === 'private') {
+        await this.sendMessage(chatId, defaultWelcome, { reply_markup: welcomeKeyboard });
+        await this.sendMessage(chatId, defaultRulesAndCommands);
+      } else {
+        await this.sendMessage(chatId, 'Te envié el mensaje de bienvenida por DM. 📩');
+        await this.sendMessage(userId, defaultWelcome, { reply_markup: welcomeKeyboard });
+        await this.sendMessage(userId, defaultRulesAndCommands);
+      }
+    }
   }
 
   async sendRules(userId, chatId, chatType) {
@@ -573,6 +759,297 @@ export class SimpleTelegramBot {
         await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
         await this.sendMessage(userId, defaultRules);
       }
+    }
+  }
+
+  // Función para generar reglas resumidas para fijar en grupos
+  getShortRules() {
+    return `📱 **CubaModel - Reglas Rápidas**
+
+1️⃣ Respeto - Sin spam ni insultos
+2️⃣ Solo compatibilidad de teléfonos
+3️⃣ Usa /subir para agregar datos
+4️⃣ /reportar para errores
+5️⃣ Base de datos abierta para todos
+
+💬 DM para reglas completas y verificación`;
+  }
+
+  async sendStats(chatId) {
+    try {
+      const { data: phones, error: phonesError } = await this.supabase
+        .from('phones')
+        .select('id, status')
+        .eq('status', 'approved');
+
+      const { data: events, error: eventsError } = await this.supabase
+        .from('events')
+        .select('id')
+        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
+      if (phonesError || eventsError) {
+        await this.sendMessage(chatId, '❌ Error obteniendo estadísticas. Intenta más tarde.');
+        return;
+      }
+
+      const totalPhones = phones?.length || 0;
+      const eventsToday = events?.length || 0;
+
+      const statsMessage = `📊 **Estadísticas de CubaModel**
+
+📱 **Teléfonos en la base:**
+• Total aprobados: ${totalPhones}
+• Última actualización: ${new Date().toLocaleDateString()}
+
+📈 **Actividad:**
+• Eventos hoy: ${eventsToday}
+• Estado: ✅ Activo
+
+🌐 **Información:**
+• Base de datos: Abierta y gratuita
+• Proyecto: Comunitario
+• Región: Cuba 🇨🇺
+
+💡 Usa /subir para agregar más teléfonos`;
+
+      await this.sendMessage(chatId, statsMessage);
+    } catch (error) {
+      logger.error('Error sending stats', error);
+      await this.sendMessage(chatId, '❌ Error obteniendo estadísticas. Intenta más tarde.');
+    }
+  }
+
+  async sendHelp(chatId) {
+    const helpMessage = `❓ **Ayuda - CubaModel Bot**
+
+🤖 **Comandos principales:**
+• /start - Mensaje de bienvenida
+• /subir - Agregar teléfono (solo DM)
+• /revisar <modelo> - Buscar teléfonos (solo grupos)
+• /reglas - Ver reglas completas
+• /exportar - Exportar base de datos (solo DM)
+• /id - Ver información de IDs
+• /reportar - Reportar problema
+
+📱 **Cómo usar:**
+1. **Agregar teléfono:** Escríbeme por DM y usa /subir
+2. **Buscar teléfonos:** En el grupo usa /revisar Samsung A14
+3. **Ver reglas:** Usa /reglas o el botón en el mensaje de bienvenida
+4. **Exportar datos:** Usa /exportar o el botón "📥 Exportar Base"
+
+🔧 **Para administradores:**
+• /fijar - Mostrar reglas cortas en grupo
+• /id - Ver información detallada
+
+❓ **¿Necesitas más ayuda?**
+Contacta a los administradores del grupo.`;
+
+    await this.sendMessage(chatId, helpMessage);
+  }
+
+  async sendExportOptions(chatId) {
+    const exportKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '📄 Exportar CSV', callback_data: 'export:csv' },
+          { text: '📋 Exportar JSON', callback_data: 'export:json' }
+        ],
+        [
+          { text: '📊 Solo Estadísticas', callback_data: 'export:stats' },
+          { text: '📱 Solo Teléfonos', callback_data: 'export:phones' }
+        ],
+        [
+          { text: '🔙 Volver', callback_data: 'welcome:back' }
+        ]
+      ]
+    };
+
+    const exportMessage = `📥 **Exportar Base de Datos**
+
+Selecciona el formato que prefieras para descargar la información:
+
+📄 **CSV** - Para Excel/Google Sheets
+📋 **JSON** - Para desarrolladores
+📊 **Estadísticas** - Solo números y resúmenes
+📱 **Teléfonos** - Solo la lista de teléfonos
+
+💡 *Los archivos se enviarán como documentos*`;
+
+    await this.sendMessage(chatId, exportMessage, { reply_markup: exportKeyboard });
+  }
+
+  async handleExportCallback(chatId, userId, format) {
+    try {
+      await this.sendMessage(chatId, '⏳ Generando archivo de exportación...');
+
+      let data, filename, content;
+
+      switch (format) {
+        case 'csv':
+          const csvData = await this.exportToCSV();
+          content = csvData;
+          filename = `cubamodel_phones_${new Date().toISOString().split('T')[0]}.csv`;
+          break;
+
+        case 'json':
+          const jsonData = await this.exportToJSON();
+          content = JSON.stringify(jsonData, null, 2);
+          filename = `cubamodel_phones_${new Date().toISOString().split('T')[0]}.json`;
+          break;
+
+        case 'stats':
+          const statsData = await this.exportStats();
+          content = JSON.stringify(statsData, null, 2);
+          filename = `cubamodel_stats_${new Date().toISOString().split('T')[0]}.json`;
+          break;
+
+        case 'phones':
+          const phonesData = await this.exportPhonesOnly();
+          content = JSON.stringify(phonesData, null, 2);
+          filename = `cubamodel_phones_only_${new Date().toISOString().split('T')[0]}.json`;
+          break;
+
+        default:
+          await this.sendMessage(chatId, '❌ Formato de exportación no válido.');
+          return;
+      }
+
+      // Enviar como documento
+      await this.sendDocument(chatId, content, filename);
+
+    } catch (error) {
+      logger.error('Error exporting data:', error);
+      await this.sendMessage(chatId, '❌ Error generando el archivo de exportación. Intenta más tarde.');
+    }
+  }
+
+  async exportToCSV() {
+    const { data: phones, error } = await this.supabase
+      .from('phones')
+      .select('*')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const headers = ['ID', 'Marca', 'Modelo', 'Banda', 'Tecnología', 'Fecha Creación', 'Estado'];
+    const csvRows = [headers.join(',')];
+
+    phones.forEach(phone => {
+      const row = [
+        phone.id,
+        `"${phone.brand || ''}"`,
+        `"${phone.model || ''}"`,
+        `"${phone.bands || ''}"`,
+        `"${phone.technologies || ''}"`,
+        phone.created_at,
+        phone.status
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    return csvRows.join('\n');
+  }
+
+  async exportToJSON() {
+    const { data: phones, error } = await this.supabase
+      .from('phones')
+      .select('*')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return {
+      export_date: new Date().toISOString(),
+      total_phones: phones.length,
+      phones: phones
+    };
+  }
+
+  async exportStats() {
+    const { data: phones, error: phonesError } = await this.supabase
+      .from('phones')
+      .select('id, status, brand, created_at');
+
+    const { data: events, error: eventsError } = await this.supabase
+      .from('events')
+      .select('id, type, created_at')
+      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+
+    if (phonesError || eventsError) throw phonesError || eventsError;
+
+    const approvedPhones = phones.filter(p => p.status === 'approved');
+    const brands = {};
+    approvedPhones.forEach(phone => {
+      if (phone.brand) {
+        brands[phone.brand] = (brands[phone.brand] || 0) + 1;
+      }
+    });
+
+    return {
+      export_date: new Date().toISOString(),
+      statistics: {
+        total_phones: phones.length,
+        approved_phones: approvedPhones.length,
+        pending_phones: phones.length - approvedPhones.length,
+        brands_distribution: brands,
+        events_last_30_days: events.length
+      },
+      summary: {
+        most_common_brand: Object.keys(brands).reduce((a, b) => brands[a] > brands[b] ? a : b, 'N/A'),
+        total_brands: Object.keys(brands).length,
+        last_updated: approvedPhones[0]?.created_at || 'N/A'
+      }
+    };
+  }
+
+  async exportPhonesOnly() {
+    const { data: phones, error } = await this.supabase
+      .from('phones')
+      .select('brand, model, bands, technologies, status')
+      .eq('status', 'approved')
+      .order('brand', { ascending: true });
+
+    if (error) throw error;
+
+    return {
+      export_date: new Date().toISOString(),
+      phones: phones.map(phone => ({
+        brand: phone.brand,
+        model: phone.model,
+        bands: phone.bands,
+        technologies: phone.technologies
+      }))
+    };
+  }
+
+  async sendDocument(chatId, content, filename) {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const formData = new FormData();
+    formData.append('document', blob, filename);
+    formData.append('chat_id', chatId);
+    formData.append('caption', `📥 ${filename}\n\nExportado el ${new Date().toLocaleString()}`);
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${this.token}/sendDocument`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      if (!result.ok) {
+        throw new Error(result.description);
+      }
+
+    } catch (error) {
+      logger.error('Error sending document:', error);
+      // Fallback: enviar como mensaje de texto si falla el documento
+      await this.sendMessage(chatId, `📄 **${filename}**\n\n\`\`\`\n${content.substring(0, 4000)}\n\`\`\``);
     }
   }
 
@@ -665,8 +1142,9 @@ export class SimpleTelegramBot {
   }
   async startCaptchaAndWelcome(user, chat) {
     await this.startCaptcha(user, chat);
+    // Solo enviar mensaje corto en grupos, no llenar el chat
     if (this.showShortWelcomeInGroup && (chat.type === 'group' || chat.type === 'supergroup')) {
-      const short = `👋 Bienvenido ${user.first_name || ''} a CubaModel. Revisa tus DM para verificar y ver las reglas.`.trim();
+      const short = `👋 ¡Hola ${user.first_name || 'usuario'}! Revisa tus DM para verificar y participar.`;
       await this.sendMessage(chat.id, short);
     }
   }
@@ -674,8 +1152,11 @@ export class SimpleTelegramBot {
     // Mark as pending with TTL 2 minutes
     await this.kvSet(`captcha:${chat.id}:${user.id}`, 'pending', 120);
     const dm =
-      'Antes de participar en el grupo, confirma que eres humano. Esto evita spam.\n' +
-      'Tienes 2 minutos.';
+      '🔐 **Verificación de seguridad**\n\n' +
+      'Antes de participar en el grupo, confirma que eres humano.\n' +
+      'Esto nos ayuda a evitar spam y mantener el grupo limpio.\n\n' +
+      '⏰ Tienes 2 minutos para verificar.\n' +
+      '❌ Si no verificas, serás expulsado automáticamente.';
     await this.sendMessage(user.id, dm, { reply_markup: this.captchaKeyboard(chat.id, user.id) });
   }
 
