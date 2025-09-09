@@ -34,12 +34,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          secrets: |
-            BOT_TOKEN
-            SUPABASE_URL
-            SUPABASE_SERVICE_ROLE_KEY
-            ADMIN_TG_IDS
-            ALLOWED_CHAT_IDS
           
       - name: Setup Webhook
         run: |
