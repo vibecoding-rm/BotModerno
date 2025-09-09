@@ -91,6 +91,12 @@ export class SimpleTelegramBot {
     });
     this.adminIds = toCsvArray(env.ADMIN_TG_IDS);
     this.allowedChatIds = toCsvArray(env.ALLOWED_CHAT_IDS);
+    // Moderation/welcome config
+    this.showShortWelcomeInGroup = String(env.SHOW_SHORT_WELCOME_IN_GROUP || 'true').toLowerCase() !== 'false';
+    this.rulesCommandEnabled = true;
+    // Optional Vercel KV REST (for future captcha/flood control)
+    this.kvUrl = env.VERCEL_KV_REST_API_URL;
+    this.kvToken = env.VERCEL_KV_REST_API_TOKEN;
   }
 
   // Telegram API helpers
@@ -129,6 +135,8 @@ export class SimpleTelegramBot {
         await this.onMessage(update.message);
       } else if (update.callback_query) {
         await this.onCallback(update.callback_query);
+      } else if (update.chat_join_request) {
+        await this.onChatJoinRequest(update.chat_join_request);
       }
     } catch (e) {
       if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
@@ -158,6 +166,19 @@ export class SimpleTelegramBot {
     // Ignore not-allowed groups
     if ((chatType === 'group' || chatType === 'supergroup') && !this.groupAllowed(chat)) return;
 
+    // Welcome new members (group join)
+    if (Array.isArray(msg.new_chat_members) && msg.new_chat_members.length) {
+      for (const m of msg.new_chat_members) {
+        if (m.is_bot) continue;
+        await this.welcomeUserDM(m, chat);
+        if (this.showShortWelcomeInGroup && (chatType === 'group' || chatType === 'supergroup')) {
+          const short = `👋 Bienvenido ${m.first_name || ''} a CubaModel. Revisa tus DM para las reglas.`.trim();
+          await this.sendMessage(chatId, short);
+        }
+      }
+      return;
+    }
+
     if (text.startsWith('/')) {
       await this.onCommand({ chatId, chatType, userId, msg, text });
       return;
@@ -182,8 +203,19 @@ export class SimpleTelegramBot {
           '• /reportar <texto> — Reportar algo sobre el último resultado\n' +
           '• /suscribir — Alta de notificaciones\n' +
           '• /cancelarsub — Baja de notificaciones\n' +
+          '• /id — Ver tus IDs\n' +
+          '• /reglas — Reglas y transparencia del proyecto\n' +
           '• /cancelar — Cancelar asistente\n'
         );
+        break;
+      }
+      case '/id': {
+        const who = `chat_id: ${chatId}\nuser_id: ${userId}`;
+        await this.sendMessage(chatId, '🆔 IDs:\n' + who);
+        break;
+      }
+      case '/reglas': {
+        await this.sendRules(userId, chatId, chatType);
         break;
       }
       case '/subir': {
@@ -466,6 +498,61 @@ export class SimpleTelegramBot {
     } catch (e) {
       logger.error('onCallback error', e, { userId });
     }
+  }
+
+  async onChatJoinRequest(req) {
+    // Approve join request instantly (optional) and DM welcome
+    const user = req.from;
+    const chat = { id: req.chat?.id, type: req.chat?.type, title: req.chat?.title };
+    // Try to approve (ignore errors silently)
+    await tgFetch(this.token, 'approveChatJoinRequest', { chat_id: chat.id, user_id: user.id });
+    await this.welcomeUserDM(user, chat);
+  }
+
+  async sendRules(userId, chatId, chatType) {
+    const rules =
+      '📜 Reglas:\n' +
+      '1) Respeto; nada de insultos ni spam.\n' +
+      '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
+      '3) Aporta datos reales con /subir.\n' +
+      '4) Usa /reportar <id> texto para avisar de errores.\n' +
+      '5) La base es de todos, nadie puede privatizarla.';
+
+    const transparency =
+      '🔎 Transparencia:\n' +
+      'Este proyecto nació porque antes intentaron cobrar por una base hecha por la comunidad.\n' +
+      'Aquí todo es abierto y descargable; hecho con pocos recursos, puede ir lento o fallar a veces.';
+
+    const text = `${rules}\n\n${transparency}`;
+
+    if (chatType === 'private') {
+      await this.sendMessage(userId, text);
+    } else {
+      await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
+      await this.sendMessage(userId, text);
+    }
+  }
+
+  async welcomeUserDM(user, chat) {
+    const fullname = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || user.username || 'amigo';
+    const msg =
+      `👋 ¡Bienvenido ${fullname} a CubaModel! 🇨🇺📱\n\n` +
+      'Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.\n' +
+      'Aquí todo es distinto: la información será siempre abierta y descargable.\n\n' +
+      '⚠️ Limitaciones:\n' +
+      '• Puede ir lento en horas pico.\n' +
+      '• Hay topes de consultas y almacenamiento.\n' +
+      '• Puede caerse o fallar a veces (fase de desarrollo).\n\n' +
+      '📜 Reglas:\n' +
+      '1) Respeto; nada de insultos ni spam.\n' +
+      '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
+      '3) Aporta datos reales con /subir.\n' +
+      '4) Usa /reportar <id> texto para avisar de errores.\n' +
+      '5) La base es de todos, nadie puede privatizarla.\n\n' +
+      'Gracias por sumarte. Esto es de todos y para todos. ✨';
+
+    // Try DM; if user has blocked bot, ignore
+    await this.sendMessage(user.id, msg);
   }
 
   formatConfirmation(d) {
