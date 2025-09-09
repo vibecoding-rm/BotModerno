@@ -1,5 +1,9 @@
 # CubaModel Bot — Cloudflare Workers + Supabase (edge)
 
+[![Deploy: Cloudflare Workers](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml)
+[![Deploy: Cloudflare Pages](https://github.com/devmaikelrm/BotModerno/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/deploy.yml)
+[![Deploy: Vercel Hook](https://github.com/devmaikelrm/BotModerno/actions/workflows/vercel-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/vercel-deploy.yml)
+
 Este repo unifica el bot de Telegram para Cloudflare Workers con integración a Supabase, sin dependencias Node en el runtime del Worker (sin Telegraf). El panel web (Next.js) puede mantenerse aparte, pero el bot funciona 100% en Workers vía webhook.
 
 ## Instalación y desarrollo

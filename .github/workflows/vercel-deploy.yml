@@ -1,4 +1,8 @@
-name: Vercel Deploy
+name: "Deploy: Vercel Hook"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -10,32 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Vercel Deploy Hook
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
-          if [ -z "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}" ]; then
+          if [ -z "${VERCEL_DEPLOY_HOOK_URL}" ]; then
             echo "Missing secret: VERCEL_DEPLOY_HOOK_URL" && exit 1
           fi
-          curl -s -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}" -H 'Content-Type: application/json' -d '{}'
+          curl -fsS -X POST "${VERCEL_DEPLOY_HOOK_URL}" -H 'Content-Type: application/json' -d '{}'
       - name: Note
         run: echo "Deployment requested via Vercel Deploy Hook. Check Vercel dashboard for progress."
-
-name: Vercel Deploy
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Vercel Deploy Hook
-        run: |
-          if [ -z "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}" ]; then
-            echo "Missing secret: VERCEL_DEPLOY_HOOK_URL" && exit 1
-          fi
-          curl -s -X POST "$${{ secrets.VERCEL_DEPLOY_HOOK_URL }}" -H 'Content-Type: application/json' -d '{}'
-      - name: Note
-        run: echo "Deployment requested via Vercel Deploy Hook. Check Vercel dashboard for progress."
-
 

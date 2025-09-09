@@ -1,10 +1,15 @@
-name: Deploy to Cloudflare Workers
+name: "Deploy: Cloudflare Workers"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -35,12 +40,6 @@ jobs:
             SUPABASE_SERVICE_ROLE_KEY
             ADMIN_TG_IDS
             ALLOWED_CHAT_IDS
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          ADMIN_TG_IDS: ${{ secrets.ADMIN_TG_IDS }}
-          ALLOWED_CHAT_IDS: ${{ secrets.ALLOWED_CHAT_IDS }}
           
       - name: Setup Webhook
         run: |
