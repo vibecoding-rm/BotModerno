@@ -112,6 +112,9 @@ export class SimpleTelegramBot {
   async sendChatAction(chat_id, action) {
     return tgFetch(this.token, 'sendChatAction', { chat_id, action });
   }
+  async deleteMessage(chat_id, message_id) {
+    return tgFetch(this.token, 'deleteMessage', { chat_id, message_id });
+  }
   async answerCallbackQuery(callback_query_id, opts = {}) {
     return tgFetch(this.token, 'answerCallbackQuery', { callback_query_id, ...opts });
   }
@@ -170,13 +173,20 @@ export class SimpleTelegramBot {
     if (Array.isArray(msg.new_chat_members) && msg.new_chat_members.length) {
       for (const m of msg.new_chat_members) {
         if (m.is_bot) continue;
-        await this.welcomeUserDM(m, chat);
-        if (this.showShortWelcomeInGroup && (chatType === 'group' || chatType === 'supergroup')) {
-          const short = `👋 Bienvenido ${m.first_name || ''} a CubaModel. Revisa tus DM para las reglas.`.trim();
-          await this.sendMessage(chatId, short);
-        }
+        await this.startCaptchaAndWelcome(m, chat);
       }
       return;
+    }
+
+    // If user has not passed captcha, block messages and remind
+    if ((chatType === 'group' || chatType === 'supergroup') && userId) {
+      const pending = await this.kvGet(`captcha:${chatId}:${userId}`);
+      if (pending === 'pending') {
+        if (msg.message_id) await this.deleteMessage(chatId, msg.message_id);
+        // remind silently
+        await this.sendMessage(chatId, `⏳ @${msg.from?.username || userId} verifica en tu DM para participar.`, {});
+        return;
+      }
     }
 
     if (text.startsWith('/')) {
@@ -443,7 +453,28 @@ export class SimpleTelegramBot {
       const userId = cb.from?.id;
       if (!chatId || !userId) return;
 
-      if (!data.startsWith('wiz:')) return; // only wizard controls here
+      // Captcha buttons
+      if (data.startsWith('cap:')) {
+        await this.answerCallbackQuery(id);
+        const parts = data.split(':'); // cap:ok|fail:chatId:userId
+        const kind = parts[1];
+        const cId = Number(parts[2]);
+        const uId = Number(parts[3]);
+        if (uId !== userId) return; // ignore others
+        if (kind === 'ok') {
+          await this.kvDel(`captcha:${cId}:${uId}`);
+          await this.sendMessage(userId, '✅ Verificación completada. ¡Bienvenido!');
+          await this.sendRules(userId, cId, 'private');
+        } else {
+          // Kick user from group
+          await tgFetch(this.token, 'banChatMember', { chat_id: cId, user_id: uId });
+          await tgFetch(this.token, 'unbanChatMember', { chat_id: cId, user_id: uId }); // immediate unban so pueda volver a intentar
+          await this.kvDel(`captcha:${cId}:${uId}`);
+        }
+        return;
+      }
+
+      if (!data.startsWith('wiz:')) return; // wizard controls below
 
       await this.answerCallbackQuery(id);
 
@@ -507,6 +538,7 @@ export class SimpleTelegramBot {
     // Try to approve (ignore errors silently)
     await tgFetch(this.token, 'approveChatJoinRequest', { chat_id: chat.id, user_id: user.id });
     await this.welcomeUserDM(user, chat);
+    await this.startCaptcha(user, chat);
   }
 
   async sendRules(userId, chatId, chatType) {
@@ -553,6 +585,56 @@ export class SimpleTelegramBot {
 
     // Try DM; if user has blocked bot, ignore
     await this.sendMessage(user.id, msg);
+  }
+
+  // --- Captcha with Vercel KV (REST) ---
+  async kvSet(key, value, exSeconds) {
+    if (!this.kvUrl || !this.kvToken) return null;
+    const res = await fetch(`${this.kvUrl}/set/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.kvToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value, ex: exSeconds })
+    });
+    try { return await res.json(); } catch { return null; }
+  }
+  async kvGet(key) {
+    if (!this.kvUrl || !this.kvToken) return null;
+    const res = await fetch(`${this.kvUrl}/get/${encodeURIComponent(key)}`, {
+      headers: { 'Authorization': `Bearer ${this.kvToken}` }
+    });
+    const json = await res.json().catch(() => null);
+    return json?.result ?? null;
+  }
+  async kvDel(key) {
+    if (!this.kvUrl || !this.kvToken) return null;
+    await fetch(`${this.kvUrl}/del/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.kvToken}` }
+    });
+  }
+
+  captchaKeyboard(chatId, userId) {
+    return {
+      inline_keyboard: [[
+        { text: '✅ Soy humano', callback_data: `cap:ok:${chatId}:${userId}` },
+        { text: '❌ No pasar', callback_data: `cap:fail:${chatId}:${userId}` }
+      ]]
+    };
+  }
+  async startCaptchaAndWelcome(user, chat) {
+    await this.startCaptcha(user, chat);
+    if (this.showShortWelcomeInGroup && (chat.type === 'group' || chat.type === 'supergroup')) {
+      const short = `👋 Bienvenido ${user.first_name || ''} a CubaModel. Revisa tus DM para verificar y ver las reglas.`.trim();
+      await this.sendMessage(chat.id, short);
+    }
+  }
+  async startCaptcha(user, chat) {
+    // Mark as pending with TTL 2 minutes
+    await this.kvSet(`captcha:${chat.id}:${user.id}`, 'pending', 120);
+    const dm =
+      'Antes de participar en el grupo, confirma que eres humano. Esto evita spam.\n' +
+      'Tienes 2 minutos.';
+    await this.sendMessage(user.id, dm, { reply_markup: this.captchaKeyboard(chat.id, user.id) });
   }
 
   formatConfirmation(d) {
