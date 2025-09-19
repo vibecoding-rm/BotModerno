@@ -1,9 +1,6 @@
 {
   "version": 2,
   "builds": [
-    { "src": "web-panel/next.config.js", "use": "@vercel/next" }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/web-panel/pages/api/$1.js" }
+    { "src": "web-panel/package.json", "use": "@vercel/next" }
   ]
 }
