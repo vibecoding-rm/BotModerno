@@ -43,16 +43,30 @@ function normalizeBandas(bandas) {
   return bandas.split(',').map(b => b.trim().toUpperCase()).filter(b => b);
 }
 
+function extractTechnologies(bandasRaw) {
+  const s = String(bandasRaw || '');
+  const tech = new Set();
+  if (/2\s*G/i.test(s)) tech.add('2G');
+  if (/3\s*G/i.test(s)) tech.add('3G');
+  if (/4\s*G/i.test(s)) tech.add('4G');
+  if (/LTE/i.test(s)) tech.add('4G');
+  if (/\bB\d{1,2}\b/i.test(s)) tech.add('4G');
+  return Array.from(tech);
+}
+
 function normalizeFunciona(val) {
-  if (/^sí$/i.test(val) || /^si$/i.test(val)) return true;
-  if (/^no$/i.test(val)) return false;
-  throw new Error(`Valor de 'Funciona' inválido: ${val}`);
+  if (val == null) return undefined;
+  const v = String(val).trim();
+  if (/^s[ií]$/i.test(v) || /^si\s*\(.*\)$/i.test(v) || /^yes$/i.test(v)) return true;
+  if (/^no$/i.test(v)) return false;
+  return undefined;
 }
 
 function dedupeByModelo(rows) {
   const map = new Map();
-  rows.forEach((row, idx) => {
-    if (row.modelo) map.set(row.modelo, { ...row, _csvLine: row._csvLine });
+  rows.forEach((row) => {
+    const key = row["Modelo"] ? String(row["Modelo"]).trim() : '';
+    if (key) map.set(key, { ...row });
   });
   return Array.from(map.values());
 }
@@ -79,15 +93,10 @@ function validateRow(row, idx) {
   if (!row["Modelo"] && row["Nombre Comercial"]) {
     row["Modelo"] = row["Nombre Comercial"];
   }
-  // Validar Funciona
-  if (!/^sí$|^si$|^no$/i.test(row["Funciona"])) {
-    throw new Error(`Fila ${idx + 2}: 'Funciona' debe ser 'Sí', 'Si' o 'No'.`);
-  }
-  // Normalizar bandas: quitar espacios raros, LTE → 4G
+    // Normalizar bandas: extraer tecnologías 2G/3G/4G (LTE->4G, B* -> 4G)
   if (row["Bandas"]) {
-    row["Bandas"] = row["Bandas"].replace(/LTE/gi, '4G').replace(/\s*,\s*/g, ',').replace(/\s+/g, '').replace(/,+/g, ',');
-    const bandasArr = normalizeBandas(row["Bandas"]);
-    row["Bandas"] = bandasArr.filter(b => ALLOWED_BANDAS.includes(b)).join(',');
+    const techs = extractTechnologies(row["Bandas"]);
+    row["Bandas"] = techs.filter(b => ALLOWED_BANDAS.includes(b)).join(',');
   }
   // Provincias: extraer solo provincias válidas, el resto a Observaciones
   if (row["Provincias"]) {
@@ -109,14 +118,16 @@ function validateRow(row, idx) {
 }
 
 function mapRow(row) {
-  return {
+  const worksVal = normalizeFunciona(row["Funciona"]);
+  const obj = {
     commercial_name: row["Nombre Comercial"].trim(),
     model: row["Modelo"].trim(),
-    works: normalizeFunciona(row["Funciona"]),
-    bands: row["Bandas"] ? normalizeBandas(row["Bandas"]) : [],
+    bands: row["Bandas"] ? extractTechnologies(row["Bandas"]) : [],
     provinces: row["Provincias"] ? row["Provincias"].split(',').map(p => normalizeProvincia(p)).filter(Boolean) : [],
     observations: row["Observaciones"] ? row["Observaciones"].trim() : null
   };
+  if (typeof worksVal === 'boolean') obj.works_in_cuba = worksVal;
+  return obj;
 }
 
 async function ensureTable(supabase, tableName) {
@@ -192,7 +203,7 @@ async function main() {
     console.log(`Duplicados internos removidos por modelo: ${dedupedCount}`);
     console.log('Primeras 10 operaciones de upsert que se harían:');
     mapped.slice(0, 10).forEach((row, i) => {
-      console.log(`#${i + 1}: upsert modelo="${row.modelo}" nombre_comercial="${row.nombre_comercial}" funciona=${row.funciona} bandas=[${row.bandas.join(', ')}] provincias=[${row.provincias.join(', ')}] observaciones="${row.observaciones || ''}"`);
+      console.log(`#${i + 1}: upsert model="${row.model}" commercial_name="${row.commercial_name}" works_in_cuba=${typeof row.works_in_cuba === 'boolean' ? row.works_in_cuba : '(default)'} bands=[${(row.bands || []).join(', ')}] provinces=[${(row.provinces || []).join(', ')}] observations="${row.observations || ''}"`);
     });
     process.exit(0);
   }
