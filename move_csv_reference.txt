@@ -1,0 +1,4 @@
+// Script para mover el archivo CSV desde Descargas a la carpeta del proyecto si es necesario
+// No se ejecuta, solo referencia para el usuario
+// En PowerShell:
+// Move-Item -Path "$env:USERPROFILE\Downloads\modelos_cuba_para_bot.csv" -Destination ".\modelos_cuba_para_bot.csv"
