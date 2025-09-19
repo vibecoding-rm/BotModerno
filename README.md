@@ -1,3 +1,4 @@
+# Deploy actualizado: Septiembre 2025
 # CubaModel Bot — Cloudflare Workers + Supabase (edge)
 
 [![Deploy: Cloudflare Workers](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml)
