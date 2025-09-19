@@ -1,35 +1,9 @@
-# Vercel deployment configuration for CubaModel Web Panel
-
-# Build settings
-[build]
-command = "npm run build"
-publish = ".next"
-
-# Environment variables (set these in Vercel dashboard)
-# SUPABASE_URL=your_supabase_url
-# SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-# SUPABASE_ANON_KEY=your_anon_key
-# PANEL_USER=admin
-# PANEL_PASS=your_secure_password
-
-# Functions configuration
-[functions]
-"web-panel/pages/api/**/*.js" = {
-  runtime = "nodejs18.x"
+{
+  "version": 2,
+  "builds": [
+    { "src": "web-panel/next.config.js", "use": "@vercel/next" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/web-panel/pages/api/$1.js" }
+  ]
 }
-
-# Headers for security
-[[headers]]
-for = "/*"
-[headers.values]
-X-Frame-Options = "DENY"
-X-Content-Type-Options = "nosniff"
-X-XSS-Protection = "1; mode=block"
-Referrer-Policy = "strict-origin-when-cross-origin"
-
-[[headers]]
-for = "/api/*"
-[headers.values]
-Access-Control-Allow-Origin = "*"
-Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
-Access-Control-Allow-Headers = "Content-Type, Authorization"
