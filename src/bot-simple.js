@@ -288,11 +288,11 @@ export class SimpleTelegramBot {
         break;
       }
       case '/reportar': {
-        await this.handleReport(chatId, userId, argStr, msg.from?.username);
+        await this.handleReport(chatId, userId, argStr);
         break;
       }
       case '/suscribir': {
-        await this.handleSubscribe(chatId, userId, msg.from?.username);
+        await this.handleSubscribe(chatId, userId);
         break;
       }
       case '/cancelarsub': {
@@ -480,13 +480,14 @@ export class SimpleTelegramBot {
   }
 
   async onCallback(cb) {
+    const id = cb.id;
+    const data = cb.data || '';
+    const msg = cb.message;
+    const chatId = msg?.chat?.id;
+    const userId = cb.from?.id;
+    if (!chatId || !userId) return;
+
     try {
-      const id = cb.id;
-      const data = cb.data || '';
-      const msg = cb.message;
-      const chatId = msg?.chat?.id;
-      const userId = cb.from?.id;
-      if (!chatId || !userId) return;
 
       // Export buttons
       if (data.startsWith('export:')) {
@@ -556,7 +557,6 @@ export class SimpleTelegramBot {
       const draft = await this.getDraft(userId);
       if (!draft) return;
 
-      const stepOrder = ['awaiting_name', 'awaiting_model', 'awaiting_works', 'awaiting_bands', 'awaiting_provinces', 'awaiting_obs', 'confirm'];
       const prevMap = {
         awaiting_model: 'awaiting_name',
         awaiting_works: 'awaiting_model',
@@ -602,7 +602,7 @@ export class SimpleTelegramBot {
         return;
       }
     } catch (e) {
-      logger.error('onCallback error', e, { userId });
+      logger.error('onCallback error', e, { userId: userId || 'unknown' });
     }
   }
 
@@ -882,32 +882,36 @@ Selecciona el formato que prefieras para descargar la información:
     try {
       await this.sendMessage(chatId, '⏳ Generando archivo de exportación...');
 
-      let data, filename, content;
+      let filename, content;
 
       switch (format) {
-        case 'csv':
+        case 'csv': {
           const csvData = await this.exportToCSV();
           content = csvData;
           filename = `cubamodel_phones_${new Date().toISOString().split('T')[0]}.csv`;
           break;
+        }
 
-        case 'json':
+        case 'json': {
           const jsonData = await this.exportToJSON();
           content = JSON.stringify(jsonData, null, 2);
           filename = `cubamodel_phones_${new Date().toISOString().split('T')[0]}.json`;
           break;
+        }
 
-        case 'stats':
+        case 'stats': {
           const statsData = await this.exportStats();
           content = JSON.stringify(statsData, null, 2);
           filename = `cubamodel_stats_${new Date().toISOString().split('T')[0]}.json`;
           break;
+        }
 
-        case 'phones':
+        case 'phones': {
           const phonesData = await this.exportPhonesOnly();
           content = JSON.stringify(phonesData, null, 2);
           filename = `cubamodel_phones_only_${new Date().toISOString().split('T')[0]}.json`;
           break;
+        }
 
         default:
           await this.sendMessage(chatId, '❌ Formato de exportación no válido.');
@@ -1025,8 +1029,12 @@ Selecciona el formato que prefieras para descargar la información:
   }
 
   async sendDocument(chatId, content, filename) {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const formData = new FormData();
+    // Use global Blob and FormData if available (Cloudflare Workers)
+    const BlobClass = globalThis.Blob;
+    const FormDataClass = globalThis.FormData;
+
+    const blob = new BlobClass([content], { type: 'text/plain' });
+    const formData = new FormDataClass();
     formData.append('document', blob, filename);
     formData.append('chat_id', chatId);
     formData.append('caption', `📥 ${filename}\n\nExportado el ${new Date().toLocaleString()}`);
@@ -1216,7 +1224,7 @@ Selecciona el formato que prefieras para descargar la información:
     await this.sendMessage(chatId, '¡Hecho! Quedó guardado. ✅');
   }
 
-  async handleReport(chatId, userId, text, username) {
+  async handleReport(chatId, userId, text) {
     try {
       const reason = (text || '').trim();
       if (!reason) {
@@ -1240,7 +1248,7 @@ Selecciona el formato que prefieras para descargar la información:
     }
   }
 
-  async handleSubscribe(chatId, userId, username) {
+  async handleSubscribe(chatId, userId) {
     try {
       const { error } = await this.supabase
         .from('subscriptions')

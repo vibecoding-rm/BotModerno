@@ -25,7 +25,6 @@ export default [
       'dist/',
       'functions/',
       'web/',
-      'web-panel/',
     ],
   },
 ];

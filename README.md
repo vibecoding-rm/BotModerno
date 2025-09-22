@@ -1,5 +1,5 @@
 # Deploy actualizado: Septiembre 2025
-# CubaModel Bot — Cloudflare Workers + Supabase (edge)
+# CubaModel Bot - Cloudflare Workers + Supabase (edge)
 
 [![Deploy: Cloudflare Workers](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml)
 <!-- Cloudflare Pages disabled
@@ -28,13 +28,13 @@ Este repo unifica el bot de Telegram para Cloudflare Workers con integración a 
    ```
 
 ## Estructura
-- src/worker.js — Entrada única del Worker (fetch handler)
-- src/bot-simple.js — Lógica del bot (Telegram API via fetch + Supabase)
-- src/validation.js — Validación de payloads con Zod
-- src/logger.js — Logging estructurado
-- .eslintrc.js — Configuración de ESLint
-- wrangler.toml — Config del Worker
-- sql/ — Scripts SQL para Supabase
+- src/worker.js - Entrada única del Worker (fetch handler)
+- src/bot-simple.js - Lógica del bot (Telegram API via fetch + Supabase)
+- src/validation.js - Validación de payloads con Zod
+- src/logger.js - Logging estructurado
+- .eslintrc.js - Configuración de ESLint
+- wrangler.toml - Config del Worker
+- sql/ - Scripts SQL para Supabase
 
 ## Requisitos de tablas (Supabase)
 - phones(id, commercial_name, model, works, bands, provinces, observations, created_at)
@@ -64,13 +64,14 @@ wrangler secret put ALLOWED_CHAT_IDS
 ```
 
 ## Seguridad y mejores prácticas
-- ✅ Secretos en Wrangler, no en código
-- ✅ Validación de payloads con Zod
-- ✅ Logging estructurado sin datos sensibles
-- ✅ RLS en Supabase con políticas service_role
-- ✅ Respuesta inmediata al webhook (<1s)
-- ✅ Manejo de idempotencia por update_id
-- ✅ Bundle pequeño (sin dependencias pesadas)
+- ✓ Secretos en Wrangler, no en código
+- ✓ Validación de payloads con Zod
+- ✓ Logging estructurado sin datos sensibles
+- ✓ RLS en Supabase con políticas service_role
+- ✓ Respuesta inmediata al webhook (<1s)
+- ✓ Manejo de idempotencia por update_id
+- ✓ Bundle pequeño (sin dependencias pesadas)
+- ✓ En producción no aceptar POST en `/` (usar `/webhook/<TG_WEBHOOK_SECRET>` y el header de Telegram). Para pruebas locales puedes habilitar `ALLOW_ROOT_WEBHOOK="true"`.
 
 ## Deploy (Worker del bot)
 - Revisar wrangler.toml (name, main, compatibility_date)
@@ -80,7 +81,7 @@ npm run deploy
 ```
 
 ## Deploy del Panel (Cloudflare Pages)
-- Directorio: web/
+- Directorio: web-panel/
 - Build command: npm ci && npm run build
 - Build output: dist
 - Functions: activar Pages Functions y mapear la carpeta functions/ (en el root del repo)
@@ -100,20 +101,21 @@ https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<tu-subdominio>.w
 ```
 
 ## Rutas del Worker
-- GET / → "OK CubaModel Bot Worker"
-- POST /webhook/<TG_WEBHOOK_SECRET> → procesa updates de Telegram (siempre responde 200)
-- Cualquier otra → 404
+- GET / -> "OK CubaModel Bot Worker"
+- POST /webhook/<TG_WEBHOOK_SECRET> -> procesa updates de Telegram (siempre responde 200)
+- Cualquier otra -> 404
 
 ## Uso del bot
-- /start — mensaje de bienvenida y ayuda
-- /subir (DM) — inicia asistente por pasos con inline keyboard
-- /revisar (grupo) — búsqueda por modelo (case/acentos insensible)
-- /cancelar — cancela asistente
-- /reportar — reporte simple
-- /suscribir /cancelarsub — alta/baja en subscriptions
+- /start - mensaje de bienvenida y ayuda
+- /subir (DM) - inicia asistente por pasos con inline keyboard
+- /revisar (grupo) - búsqueda por modelo (case/acentos insensible)
+- /cancelar - cancela asistente
+- /reportar - reporte simple
+- /suscribir /cancelarsub - alta/baja en subscriptions
 
 Notas:
 - En DM, /subir nunca muestra el cartel de /revisar.
 - Guardado de model en UPPERCASE.
 - Si no hay resultados en /revisar: sugiere usar /subir.
 - Filtrado de grupos por ALLOWED_CHAT_IDS si se configuró.
+

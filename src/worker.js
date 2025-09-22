@@ -54,30 +54,8 @@ export default {
       });
     }
 
-    // Para pruebas: aceptar webhooks en la raíz sin validación de secret
-    if (request.method === 'POST' && url.pathname === '/') {
-      // Procesar webhook directamente
-      let update;
-      try {
-        update = await request.json();
-      } catch {
-        return new Response('Bad Request', { status: 400 });
-      }
-
-      try {
-        await handleUpdate(update, env);
-        return new Response('OK', { status: 200 });
-      } catch (e) {
-        // Si el insert rompió unique constraint (duplicado), respondemos 200 para que Telegram no reintente
-        if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
-          // log in background; don't block response
-          ctx.waitUntil(logEvent(env, 'duplicate', { reason: 'fingerprint', update_id: update?.update_id }));
-          return new Response('OK', { status: 200 });
-        }
-        ctx.waitUntil(logEvent(env, 'error', { where: 'handleUpdate', error: String(e) }));
-        return new Response('OK', { status: 200 });
-      }
-    }
+    // POST / disabled unless ALLOW_ROOT_WEBHOOK flag is explicitly set to 'true'
+    // This prevents accidental webhook processing on root path in production
 
     const expectedSecret = env.TG_WEBHOOK_SECRET;
     if (!expectedSecret) {

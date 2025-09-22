@@ -117,7 +117,7 @@ function validateRow(row, idx) {
   }
 }
 
-function mapRow(row) {
+function mapRow(row, worksColumn) {
   const worksVal = normalizeFunciona(row["Funciona"]);
   const obj = {
     commercial_name: row["Nombre Comercial"].trim(),
@@ -126,13 +126,23 @@ function mapRow(row) {
     provinces: row["Provincias"] ? row["Provincias"].split(',').map(p => normalizeProvincia(p)).filter(Boolean) : [],
     observations: row["Observaciones"] ? row["Observaciones"].trim() : null
   };
-  if (typeof worksVal === 'boolean') obj.works_in_cuba = worksVal;
+  if (typeof worksVal === 'boolean' && worksColumn) obj[worksColumn] = worksVal;
   return obj;
 }
 
 async function ensureTable(supabase, tableName) {
   // No crear tabla, solo continuar (se asume que la tabla 'phones' ya existe)
   return;
+}
+
+async function detectWorksColumn(supabase, tableName) {
+  const trySelect = async (col) => {
+    const { error } = await supabase.from(tableName).select(col).limit(1);
+    return !error;
+  };
+  if (await trySelect('works_in_cuba')) return 'works_in_cuba';
+  if (await trySelect('works')) return 'works';
+  throw new Error(`La tabla ${tableName} no tiene columnas 'works_in_cuba' ni 'works'.`);
 }
 
 async function main() {
@@ -190,7 +200,8 @@ async function main() {
   // Dedupe por modelo (última ocurrencia)
   const deduped = dedupeByModelo(validRows);
   const dedupedCount = validRows.length - deduped.length;
-  const mapped = deduped.map(mapRow);
+  const worksColumn = await detectWorksColumn(supabase, tableName);
+  const mapped = deduped.map(r => mapRow(r, worksColumn));
 
   // --- Dry run ---
   if (dryRun) {
@@ -203,7 +214,8 @@ async function main() {
     console.log(`Duplicados internos removidos por modelo: ${dedupedCount}`);
     console.log('Primeras 10 operaciones de upsert que se harían:');
     mapped.slice(0, 10).forEach((row, i) => {
-      console.log(`#${i + 1}: upsert model="${row.model}" commercial_name="${row.commercial_name}" works_in_cuba=${typeof row.works_in_cuba === 'boolean' ? row.works_in_cuba : '(default)'} bands=[${(row.bands || []).join(', ')}] provinces=[${(row.provinces || []).join(', ')}] observations="${row.observations || ''}"`);
+      const worksStr = typeof row[worksColumn] === 'boolean' ? row[worksColumn] : '(default)';
+      console.log(`#${i + 1}: upsert model="${row.model}" commercial_name="${row.commercial_name}" ${worksColumn}=${worksStr} bands=[${(row.bands || []).join(', ')}] provinces=[${(row.provinces || []).join(', ')}] observations="${row.observations || ''}"`);
     });
     process.exit(0);
   }
@@ -216,28 +228,50 @@ async function main() {
     process.exit(2);
   }
 
-  // --- Upsert en lotes ---
+  // --- Upsert en lotes (manual: insert/update por 'model') ---
   const BATCH_SIZE = 500;
   let total = 0;
-  let limit = pLimit(5); // 5 requests concurrentes
   let errors = 0;
   for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
     const chunk = mapped.slice(i, i + BATCH_SIZE);
     try {
-      await limit(async () => {
+      const models = chunk.map(r => r.model).filter(Boolean);
+      const { data: existing, error: selErr } = await supabase.from(tableName).select('id, model').in('model', models);
+      if (selErr) throw selErr;
+      const existingSet = new Set((existing || []).map(r => r.model));
+      const toInsert = chunk.filter(r => !existingSet.has(r.model));
+      const toUpdate = chunk.filter(r => existingSet.has(r.model));
+
+      if (toInsert.length) {
         let retries = 0;
         while (retries < 5) {
-          const { error } = await supabase.from(tableName).upsert(chunk, { onConflict: 'model' });
-          if (!error) break;
-          if (error.message && /timeout|network|temporar/i.test(error.message)) {
+          const { error: insErr } = await supabase.from(tableName).insert(toInsert);
+          if (!insErr) break;
+          if (insErr.message && /timeout|network|temporar/i.test(insErr.message)) {
             await new Promise(res => setTimeout(res, 1000 * Math.pow(2, retries)));
             retries++;
           } else {
-            throw error;
+            throw insErr;
           }
         }
-      });
-      total += chunk.length;
+        total += toInsert.length;
+      }
+
+      for (const row of toUpdate) {
+        let retries = 0;
+        while (retries < 5) {
+          const patch = { ...row };
+          const { error: updErr } = await supabase.from(tableName).update(patch).eq('model', row.model);
+          if (!updErr) break;
+          if (updErr.message && /timeout|network|temporar/i.test(updErr.message)) {
+            await new Promise(res => setTimeout(res, 1000 * Math.pow(2, retries)));
+            retries++;
+          } else {
+            throw updErr;
+          }
+        }
+        total += 1;
+      }
     } catch (e) {
       console.error('Error en upsert:', e.message);
       errors++;
