@@ -1,13 +1,12 @@
 /* src/bot-simple.js
  * Telegram bot logic for Cloudflare Workers (no Telegraf).
  * - Direct Telegram API via fetch
- * - Supabase v2 client configured for edge
+ * - Cloudflare D1 SQL queries
  * - DM wizard with inline keyboards
  * - Group-only /revisar search (case/accents-insensitive) by model
  * - Model saved in UPPERCASE
  */
 
-import { createClient } from '@supabase/supabase-js';
 import { logger } from './logger.js';
 import { validate, phoneSubmissionSchema } from './validation.js';
 
@@ -96,19 +95,14 @@ function kbConfirm() {
 export class SimpleTelegramBot {
   constructor(env) {
     this.token = env.BOT_TOKEN;
-    // Supabase edge-safe client
-    this.supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false },
-      global: { fetch }
-    });
+    this.db = env.DB;
     this.adminIds = toCsvArray(env.ADMIN_TG_IDS);
     this.allowedChatIds = toCsvArray(env.ALLOWED_CHAT_IDS);
     // Moderation/welcome config
     this.showShortWelcomeInGroup = String(env.SHOW_SHORT_WELCOME_IN_GROUP || 'true').toLowerCase() !== 'false';
     this.rulesCommandEnabled = true;
-    // Optional Vercel KV REST (for future captcha/flood control)
-    this.kvUrl = env.VERCEL_KV_REST_API_URL;
-    this.kvToken = env.VERCEL_KV_REST_API_TOKEN;
+    // Cloudflare KV (captcha/flood control)
+    this.kv = env.APP_KV;
   }
 
   // Telegram API helpers
@@ -324,15 +318,27 @@ export class SimpleTelegramBot {
   async searchByModel(chatId, query) {
     try {
       const q = normalizeText(query);
-      const { data, error } = await this.supabase
-        .from('phones')
-        .select('id, commercial_name, model, works, bands, provinces, observations, created_at')
-        .eq('status', 'approved')
-        .or('nombre_comercial.ilike.%' + q + '%,model.ilike.%' + q + '%')
-        .limit(50);
-      if (error) throw error;
-
-      const matches = data || [];
+      const res = await this.db.prepare(
+        "SELECT id, commercial_name, model, works, bands, provinces, observations, created_at FROM phones WHERE status = 'approved' AND (nombre_comercial LIKE ?1 OR model LIKE ?1) LIMIT 50"
+      ).bind('%' + q + '%').all();
+      
+      const rawMatches = res.results || [];
+      const matches = rawMatches.map(r => {
+        let bands = r.bands;
+        if (typeof bands === 'string') {
+          try { bands = JSON.parse(bands); } catch (e) { bands = []; }
+        }
+        let provinces = r.provinces;
+        if (typeof provinces === 'string') {
+          try { provinces = JSON.parse(provinces); } catch (e) { provinces = []; }
+        }
+        return {
+          ...r,
+          bands: Array.isArray(bands) ? bands : [],
+          provinces: Array.isArray(provinces) ? provinces : [],
+          works: r.works === 1 || r.works === true ? true : (r.works === 0 || r.works === false ? false : null)
+        };
+      });
 
       if (!matches.length) {
         await this.sendMessage(chatId, 'No encontramos ese modelo. ¿Quieres usar /subir para proponerlo?');
@@ -356,38 +362,74 @@ export class SimpleTelegramBot {
     }
   }
 
-  // Wizard state persistence
   async getDraft(tgId) {
-    const { data } = await this.supabase
-      .from('submission_drafts')
-      .select('*')
-      .eq('tg_id', String(tgId))
-      .maybeSingle();
-    return data || null;
+    const row = await this.db.prepare("SELECT * FROM submission_drafts WHERE tg_id = ?1").bind(String(tgId)).first();
+    if (!row) return null;
+    
+    let bands = row.bands;
+    if (typeof bands === 'string') {
+      try { bands = JSON.parse(bands); } catch (e) { bands = []; }
+    }
+    let provinces = row.provinces;
+    if (typeof provinces === 'string') {
+      try { provinces = JSON.parse(provinces); } catch (e) { provinces = []; }
+    }
+    return {
+      ...row,
+      bands: Array.isArray(bands) ? bands : [],
+      provinces: Array.isArray(provinces) ? provinces : [],
+      works: row.works === 1 || row.works === true ? true : (row.works === 0 || row.works === false ? false : null)
+    };
   }
   async setDraft(tgId, patch) {
     const existing = await this.getDraft(tgId);
+    
+    const step = patch.hasOwnProperty('step') ? patch.step : (existing ? existing.step : 'awaiting_name');
+    const commercial_name = patch.hasOwnProperty('commercial_name') ? patch.commercial_name : (existing ? existing.commercial_name : null);
+    const model = patch.hasOwnProperty('model') ? patch.model : (existing ? existing.model : null);
+    
+    const worksVal = patch.hasOwnProperty('works') ? patch.works : (existing ? existing.works : null);
+    const works = worksVal === true ? 1 : (worksVal === false ? 0 : null);
+    
+    const bandsVal = patch.hasOwnProperty('bands') ? patch.bands : (existing ? existing.bands : null);
+    const bands = Array.isArray(bandsVal) ? JSON.stringify(bandsVal) : (typeof bandsVal === 'string' ? bandsVal : null);
+    
+    const provincesVal = patch.hasOwnProperty('provinces') ? patch.provinces : (existing ? existing.provinces : null);
+    const provinces = Array.isArray(provincesVal) ? JSON.stringify(provincesVal) : (typeof provincesVal === 'string' ? provincesVal : null);
+    
+    const observations = patch.hasOwnProperty('observations') ? patch.observations : (existing ? existing.observations : null);
+    const updatedAt = new Date().toISOString();
+    
+    let row;
     if (existing) {
-      const { data, error } = await this.supabase
-        .from('submission_drafts')
-        .update({ ...existing, ...patch, updated_at: new Date().toISOString() })
-        .eq('tg_id', String(tgId))
-        .select('*')
-        .single();
-      if (error) throw error;
-      return data;
+      row = await this.db.prepare(
+        "UPDATE submission_drafts SET step = ?1, commercial_name = ?2, model = ?3, works = ?4, bands = ?5, provinces = ?6, observations = ?7, updated_at = ?8 WHERE tg_id = ?9 RETURNING *"
+      ).bind(step, commercial_name, model, works, bands, provinces, observations, updatedAt, String(tgId)).first();
     } else {
-      const { data, error } = await this.supabase
-        .from('submission_drafts')
-        .insert({ tg_id: String(tgId), step: 'awaiting_name', ...patch, updated_at: new Date().toISOString() })
-        .select('*')
-        .single();
-      if (error) throw error;
-      return data;
+      row = await this.db.prepare(
+        "INSERT INTO submission_drafts (tg_id, step, commercial_name, model, works, bands, provinces, observations, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) RETURNING *"
+      ).bind(String(tgId), step, commercial_name, model, works, bands, provinces, observations, updatedAt).first();
     }
+    
+    if (!row) throw new Error("Failed to save draft");
+    
+    let parsedBands = row.bands;
+    if (typeof parsedBands === 'string') {
+      try { parsedBands = JSON.parse(parsedBands); } catch (e) { parsedBands = []; }
+    }
+    let parsedProvinces = row.provinces;
+    if (typeof parsedProvinces === 'string') {
+      try { parsedProvinces = JSON.parse(parsedProvinces); } catch (e) { parsedProvinces = []; }
+    }
+    return {
+      ...row,
+      bands: Array.isArray(parsedBands) ? parsedBands : [],
+      provinces: Array.isArray(parsedProvinces) ? parsedProvinces : [],
+      works: row.works === 1 || row.works === true ? true : (row.works === 0 || row.works === false ? false : null)
+    };
   }
   async clearDraft(tgId) {
-    await this.supabase.from('submission_drafts').delete().eq('tg_id', String(tgId));
+    await this.db.prepare("DELETE FROM submission_drafts WHERE tg_id = ?1").bind(String(tgId)).run();
   }
 
   // Wizard control
@@ -653,12 +695,8 @@ export class SimpleTelegramBot {
   async sendWelcomeMessage(chatId, userId, chatType) {
     try {
       // Get welcome message from database
-      const { data } = await this.supabase
-        .from('bot_config')
-        .select('welcome')
-        .single();
-
-      let welcomeMessage = data?.welcome;
+      const row = await this.db.prepare("SELECT welcome FROM bot_config LIMIT 1").first();
+      let welcomeMessage = row?.welcome;
       
       if (!welcomeMessage) {
         // Fallback to default welcome message
@@ -764,12 +802,8 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
   async sendRules(userId, chatId, chatType) {
     try {
       // Get rules from database
-      const { data } = await this.supabase
-        .from('bot_config')
-        .select('rules')
-        .single();
-
-      const rules = data?.rules || 
+      const row = await this.db.prepare("SELECT rules FROM bot_config LIMIT 1").first();
+      const rules = row?.rules || 
         '📜 Reglas:\n' +
         '1) Respeto; nada de insultos ni spam.\n' +
         '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
@@ -811,23 +845,12 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
 
   async sendStats(chatId) {
     try {
-      const { data: phones, error: phonesError } = await this.supabase
-        .from('phones')
-        .select('id, status')
-        .eq('status', 'approved');
+      const phonesRow = await this.db.prepare("SELECT COUNT(*) AS n FROM phones WHERE status = 'approved'").first();
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const eventsRow = await this.db.prepare("SELECT COUNT(*) AS n FROM events WHERE created_at >= ?1").bind(cutoff).first();
 
-      const { data: events, error: eventsError } = await this.supabase
-        .from('events')
-        .select('id')
-        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-
-      if (phonesError || eventsError) {
-        await this.sendMessage(chatId, '❌ Error obteniendo estadísticas. Intenta más tarde.');
-        return;
-      }
-
-      const totalPhones = phones?.length || 0;
-      const eventsToday = events?.length || 0;
+      const totalPhones = phonesRow?.n || 0;
+      const eventsToday = eventsRow?.n || 0;
 
       const statsMessage = `📊 **Estadísticas de CubaModel**
 
@@ -962,24 +985,37 @@ Selecciona el formato que prefieras para descargar la información:
   }
 
   async exportToCSV() {
-    const { data: phones, error } = await this.supabase
-      .from('phones')
-      .select('*')
-      .eq('status', 'approved')
-      .order('created_at', { ascending: false });
+    let phones;
+    try {
+      const res = await this.db.prepare("SELECT * FROM phones WHERE status = 'approved' ORDER BY created_at DESC").all();
+      phones = res.results || [];
+    } catch (e) {
+      throw e;
+    }
 
-    if (error) throw error;
-
-    const headers = ['ID', 'Marca', 'Modelo', 'Banda', 'Tecnología', 'Fecha Creación', 'Estado'];
+    const headers = ['ID', 'Nombre', 'Modelo', 'Funciona', 'Bandas', 'Provincias', 'Observaciones', 'Fecha Creación', 'Estado'];
     const csvRows = [headers.join(',')];
+
+    const csvCell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const joinJson = (v) => {
+      if (typeof v === 'string') {
+        try {
+          const parsed = JSON.parse(v);
+          if (Array.isArray(parsed)) return parsed.join(', ');
+        } catch (e) {}
+      }
+      return Array.isArray(v) ? v.join(', ') : (v || '');
+    };
 
     phones.forEach(phone => {
       const row = [
         phone.id,
-        `"${phone.brand || ''}"`,
-        `"${phone.model || ''}"`,
-        `"${phone.bands || ''}"`,
-        `"${phone.technologies || ''}"`,
+        csvCell(phone.commercial_name),
+        csvCell(phone.model),
+        phone.works ? 'Sí' : 'No',
+        csvCell(joinJson(phone.bands)),
+        csvCell(joinJson(phone.provinces)),
+        csvCell(phone.observations),
         phone.created_at,
         phone.status
       ];
@@ -990,74 +1026,83 @@ Selecciona el formato que prefieras para descargar la información:
   }
 
   async exportToJSON() {
-    const { data: phones, error } = await this.supabase
-      .from('phones')
-      .select('*')
-      .eq('status', 'approved')
-      .order('created_at', { ascending: false });
+    let phones;
+    try {
+      const res = await this.db.prepare("SELECT * FROM phones WHERE status = 'approved' ORDER BY created_at DESC").all();
+      phones = res.results || [];
+    } catch (e) {
+      throw e;
+    }
 
-    if (error) throw error;
-
-    return {
-      export_date: new Date().toISOString(),
-      total_phones: phones.length,
-      phones: phones
-    };
-  }
-
-  async exportStats() {
-    const { data: phones, error: phonesError } = await this.supabase
-      .from('phones')
-      .select('id, status, brand, created_at');
-
-    const { data: events, error: eventsError } = await this.supabase
-      .from('events')
-      .select('id, type, created_at')
-      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-
-    if (phonesError || eventsError) throw phonesError || eventsError;
-
-    const approvedPhones = phones.filter(p => p.status === 'approved');
-    const brands = {};
-    approvedPhones.forEach(phone => {
-      if (phone.brand) {
-        brands[phone.brand] = (brands[phone.brand] || 0) + 1;
+    const parsedPhones = phones.map(phone => {
+      let bands = phone.bands;
+      if (typeof bands === 'string') {
+        try { bands = JSON.parse(bands); } catch (e) { bands = []; }
       }
+      let provinces = phone.provinces;
+      if (typeof provinces === 'string') {
+        try { provinces = JSON.parse(provinces); } catch (e) { provinces = []; }
+      }
+      return {
+        ...phone,
+        bands: Array.isArray(bands) ? bands : [],
+        provinces: Array.isArray(provinces) ? provinces : [],
+        works: phone.works === 1 || phone.works === true ? true : (phone.works === 0 || phone.works === false ? false : null)
+      };
     });
 
     return {
       export_date: new Date().toISOString(),
+      total_phones: parsedPhones.length,
+      phones: parsedPhones
+    };
+  }
+
+  async exportStats() {
+    const counts = await this.db.prepare(
+      "SELECT COUNT(*) AS total, SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) AS approved, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN works=1 THEN 1 ELSE 0 END) AS works_yes FROM phones"
+    ).first();
+
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const eventsRow = await this.db.prepare("SELECT COUNT(*) AS n FROM events WHERE created_at >= ?1").bind(cutoff).first();
+    const lastRow = await this.db.prepare("SELECT MAX(created_at) AS last FROM phones WHERE status='approved'").first();
+
+    return {
+      export_date: new Date().toISOString(),
       statistics: {
-        total_phones: phones.length,
-        approved_phones: approvedPhones.length,
-        pending_phones: phones.length - approvedPhones.length,
-        brands_distribution: brands,
-        events_last_30_days: events.length
+        total_phones: counts?.total || 0,
+        approved_phones: counts?.approved || 0,
+        pending_phones: counts?.pending || 0,
+        works_in_cuba: counts?.works_yes || 0,
+        events_last_30_days: eventsRow?.n || 0
       },
       summary: {
-        most_common_brand: Object.keys(brands).reduce((a, b) => brands[a] > brands[b] ? a : b, 'N/A'),
-        total_brands: Object.keys(brands).length,
-        last_updated: approvedPhones[0]?.created_at || 'N/A'
+        last_updated: lastRow?.last || 'N/A'
       }
     };
   }
 
   async exportPhonesOnly() {
-    const { data: phones, error } = await this.supabase
-      .from('phones')
-      .select('brand, model, bands, technologies, status')
-      .eq('status', 'approved')
-      .order('brand', { ascending: true });
+    const res = await this.db.prepare(
+      "SELECT commercial_name, model, works, bands, provinces FROM phones WHERE status = 'approved' ORDER BY commercial_name ASC"
+    ).all();
+    const phones = res.results || [];
 
-    if (error) throw error;
+    const parseJson = (v) => {
+      if (typeof v === 'string') {
+        try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch (e) { return []; }
+      }
+      return Array.isArray(v) ? v : [];
+    };
 
     return {
       export_date: new Date().toISOString(),
       phones: phones.map(phone => ({
-        brand: phone.brand,
+        commercial_name: phone.commercial_name,
         model: phone.model,
-        bands: phone.bands,
-        technologies: phone.technologies
+        works: phone.works === 1 || phone.works === true,
+        bands: parseJson(phone.bands),
+        provinces: parseJson(phone.provinces)
       }))
     };
   }
@@ -1098,12 +1143,8 @@ Selecciona el formato que prefieras para descargar la información:
   async welcomeUserDM(user, chat) {
     try {
       // Get welcome message from database
-      const { data } = await this.supabase
-        .from('bot_config')
-        .select('welcome')
-        .single();
-
-      let msg = data?.welcome;
+      const row = await this.db.prepare("SELECT welcome FROM bot_config LIMIT 1").first();
+      let msg = row?.welcome;
       
       if (!msg) {
         // Fallback to default welcome message
@@ -1148,42 +1189,47 @@ Selecciona el formato que prefieras para descargar la información:
     }
   }
 
-  // --- Captcha with Vercel KV (REST) ---
+  // --- Captcha with Cloudflare KV (binding APP_KV) ---
   async kvSet(key, value, exSeconds) {
-    if (!this.kvUrl || !this.kvToken) return null;
-    const res = await fetch(`${this.kvUrl}/set/${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${this.kvToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value, ex: exSeconds })
-    });
-    try { return await res.json(); } catch { return null; }
+    if (!this.kv) return null;
+    try {
+      await this.kv.put(key, String(value), { expirationTtl: exSeconds });
+      return true;
+    } catch (e) {
+      logger.error('kvSet error', e, { key });
+      return null;
+    }
   }
   async kvGet(key) {
-    if (!this.kvUrl || !this.kvToken) return null;
-    const res = await fetch(`${this.kvUrl}/get/${encodeURIComponent(key)}`, {
-      headers: { 'Authorization': `Bearer ${this.kvToken}` }
-    });
-    const json = await res.json().catch(() => null);
-    return json?.result ?? null;
+    if (!this.kv) return null;
+    try {
+      return await this.kv.get(key);
+    } catch (e) {
+      logger.error('kvGet error', e, { key });
+      return null;
+    }
   }
   async kvDel(key) {
-    if (!this.kvUrl || !this.kvToken) return null;
-    await fetch(`${this.kvUrl}/del/${encodeURIComponent(key)}`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${this.kvToken}` }
-    });
+    if (!this.kv) return null;
+    try {
+      await this.kv.delete(key);
+    } catch (e) {
+      logger.error('kvDel error', e, { key });
+    }
   }
-  async kvKeys(pattern) {
-    if (!this.kvUrl || !this.kvToken) return [];
-    const res = await fetch(`${this.kvUrl}/keys/${encodeURIComponent(pattern)}`, {
-      headers: { 'Authorization': `Bearer ${this.kvToken}` }
-    });
-    const json = await res.json().catch(() => null);
-    return json?.result ?? [];
+  async kvKeys(prefix) {
+    if (!this.kv) return [];
+    try {
+      const listed = await this.kv.list({ prefix });
+      return (listed.keys || []).map(k => k.name);
+    } catch (e) {
+      logger.error('kvKeys error', e, { prefix });
+      return [];
+    }
   }
   async kickExpiredCaptchas() {
     try {
-      const keys = await this.kvKeys('captcha:*');
+      const keys = await this.kvKeys('captcha:');
       if (!keys || !keys.length) return;
 
       for (const key of keys) {
@@ -1278,23 +1324,30 @@ Selecciona el formato que prefieras para descargar la información:
       return;
     }
 
-    const { error } = await this.supabase
-      .from('phones')
-      .insert({ ...payload, created_at: new Date().toISOString() });
+    const bandsStr = JSON.stringify(payload.bands);
+    const provincesStr = JSON.stringify(payload.provinces);
+    const worksInt = payload.works ? 1 : 0;
+    const createdAt = new Date().toISOString();
 
-    if (error) {
-      if (String(error).includes('duplicate key value') || String(error).includes('unique constraint')) {
-        // Let upper layer handle duplicate specially by throwing
-        throw error;
-      } else {
-        logger.error('submitPhone error', error, { userId, chatId });
-        await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
+    const nombreComercial = normalizeText(payload.commercial_name);
+
+    try {
+      await this.db.prepare(
+        "INSERT INTO phones (commercial_name, model, works, bands, provinces, observations, nombre_comercial, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+      ).bind(payload.commercial_name, payload.model, worksInt, bandsStr, provincesStr, payload.observations, nombreComercial, createdAt).run();
+    } catch (error) {
+      if (/unique constraint|duplicate key/i.test(String(error))) {
+        await this.clearDraft(userId);
+        await this.sendMessage(chatId, '📱 Ese modelo ya está en la base de datos. Si crees que hay un error en sus datos, usa /reportar para avisarnos. ¡Gracias por aportar!');
         return;
       }
+      logger.error('submitPhone error', error, { userId, chatId });
+      await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
+      return;
     }
 
     await this.clearDraft(userId);
-    await this.sendMessage(chatId, '¡Hecho! Quedó guardado. ✅');
+    await this.sendMessage(chatId, '¡Hecho! Tu propuesta quedó guardada y pasará a revisión. ✅\nCuando un admin la apruebe aparecerá en /revisar.');
   }
 
   async handleReport(chatId, userId, text) {
@@ -1304,16 +1357,10 @@ Selecciona el formato que prefieras para descargar la información:
         await this.sendMessage(chatId, 'Escribe: /reportar <texto del reporte>.');
         return;
       }
-      const { error } = await this.supabase
-        .from('reports')
-        .insert({
-          tg_id: String(userId),
-          chat_id: String(chatId),
-          model: null, // si se quiere ligar al último resultado, debe guardarse ese contexto aparte
-          reason,
-          created_at: new Date().toISOString()
-        });
-      if (error) throw error;
+      const createdAt = new Date().toISOString();
+      await this.db.prepare(
+        "INSERT INTO reports (tg_id, chat_id, model, reason, created_at) VALUES (?1, ?2, NULL, ?3, ?4)"
+      ).bind(String(userId), String(chatId), reason, createdAt).run();
       await this.sendMessage(chatId, 'Reporte recibido. Gracias por avisar.');
     } catch (e) {
       logger.error('handleReport error', e, { chatId, userId });
@@ -1323,10 +1370,10 @@ Selecciona el formato que prefieras para descargar la información:
 
   async handleSubscribe(chatId, userId) {
     try {
-      const { error } = await this.supabase
-        .from('subscriptions')
-        .upsert({ tg_id: String(userId), created_at: new Date().toISOString() });
-      if (error) throw error;
+      const createdAt = new Date().toISOString();
+      await this.db.prepare(
+        "INSERT OR REPLACE INTO subscriptions (tg_id, created_at) VALUES (?1, ?2)"
+      ).bind(String(userId), createdAt).run();
       await this.sendMessage(chatId, 'Suscripción activada. 📣');
     } catch (e) {
       logger.error('handleSubscribe error', e, { chatId, userId });
@@ -1335,7 +1382,7 @@ Selecciona el formato que prefieras para descargar la información:
   }
   async handleUnsubscribe(chatId, userId) {
     try {
-      await this.supabase.from('subscriptions').delete().eq('tg_id', String(userId));
+      await this.db.prepare("DELETE FROM subscriptions WHERE tg_id = ?1").bind(String(userId)).run();
       await this.sendMessage(chatId, 'Suscripción cancelada. 🔕');
     } catch (e) {
       logger.error('handleUnsubscribe error', e, { chatId, userId });

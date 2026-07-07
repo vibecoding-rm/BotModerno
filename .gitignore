@@ -129,3 +129,8 @@ temp/
 .idea/
 *.swp
 *.swoweb-panel/.env.local
+
+# Local backups and build artifacts
+backup/
+dist-check/
+.agents/

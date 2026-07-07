@@ -14,16 +14,7 @@ import { logger } from './logger.js';
 import { logEvent, logWebhookEvent } from './lib/events.js';
 
 async function handleUpdate(update, env) {
-  const botEnv = {
-    BOT_TOKEN: env.BOT_TOKEN,
-    SUPABASE_URL: env.SUPABASE_URL,
-    SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-    ADMIN_TG_IDS: env.ADMIN_TG_IDS,
-    ALLOWED_CHAT_IDS: env.ALLOWED_CHAT_IDS,
-    VERCEL_KV_REST_API_URL: env.VERCEL_KV_REST_API_URL,
-    VERCEL_KV_REST_API_TOKEN: env.VERCEL_KV_REST_API_TOKEN,
-  };
-  const bot = new SimpleTelegramBot(botEnv);
+  const bot = new SimpleTelegramBot(env);
   const validation = validate(telegramUpdateSchema, update);
   if (!validation.success) {
     logger.error('Invalid update payload', null, { errors: validation.error });
@@ -31,8 +22,6 @@ async function handleUpdate(update, env) {
     return;
   }
   
-  // Log successful webhook processing
-  await logWebhookEvent(env, validation.data, 'processing');
   await bot.handleUpdate(validation.data);
   await logWebhookEvent(env, validation.data, 'completed');
 }
@@ -62,6 +51,43 @@ export default {
     const expectedSecret = env.TG_WEBHOOK_SECRET;
     if (!expectedSecret) {
       return new Response('Misconfigured: TG_WEBHOOK_SECRET', { status: 500 });
+    }
+
+    // Admin: GET /setup-webhook/<secret> registra el webhook y los comandos del bot
+    // usando el BOT_TOKEN guardado en secrets (idempotente).
+    const setupMatch = url.pathname.match(/^\/setup-webhook\/(.+)$/);
+    if (request.method === 'GET' && setupMatch) {
+      if (setupMatch[1] !== expectedSecret) return new Response('Not found', { status: 404 });
+      const webhookUrl = `${url.origin}/webhook/${expectedSecret}`;
+      const tg = (method, payload) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+
+      const setWebhook = await tg('setWebhook', {
+        url: webhookUrl,
+        secret_token: expectedSecret,
+        allowed_updates: ['message', 'callback_query', 'chat_join_request'],
+        drop_pending_updates: true
+      });
+      const setCommands = await tg('setMyCommands', {
+        commands: [
+          { command: 'start', description: 'Bienvenida y menú principal' },
+          { command: 'revisar', description: 'Buscar un teléfono (en el grupo)' },
+          { command: 'subir', description: 'Proponer un teléfono (por DM)' },
+          { command: 'reglas', description: 'Ver las reglas' },
+          { command: 'exportar', description: 'Descargar la base de datos (por DM)' },
+          { command: 'reportar', description: 'Reportar un error en los datos' },
+          { command: 'suscribir', description: 'Recibir avisos de novedades' },
+          { command: 'id', description: 'Ver tu ID de Telegram' }
+        ]
+      });
+      const info = await tg('getWebhookInfo', {});
+      return new Response(JSON.stringify({ setWebhook, setCommands, webhookInfo: info }, null, 2), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     // 1) Validación por ruta: /webhook/<secret>
@@ -113,16 +139,7 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    const botEnv = {
-      BOT_TOKEN: env.BOT_TOKEN,
-      SUPABASE_URL: env.SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
-      ADMIN_TG_IDS: env.ADMIN_TG_IDS,
-      ALLOWED_CHAT_IDS: env.ALLOWED_CHAT_IDS,
-      VERCEL_KV_REST_API_URL: env.VERCEL_KV_REST_API_URL,
-      VERCEL_KV_REST_API_TOKEN: env.VERCEL_KV_REST_API_TOKEN,
-    };
-    const bot = new SimpleTelegramBot(botEnv);
+    const bot = new SimpleTelegramBot(env);
     ctx.waitUntil(bot.kickExpiredCaptchas());
   }
 }

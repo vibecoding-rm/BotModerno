@@ -22,12 +22,16 @@ export async function logEvent(env, eventType, data = {}) {
     // Log to console for now (can be extended to external services)
     logger.info(`Event: ${eventType}`, event);
 
-    // If KV is available, store events there
-    if (env.EVENTS_KV) {
-      const key = `event:${Date.now()}:${eventType}`;
-      await env.EVENTS_KV.put(key, JSON.stringify(event), {
-        expirationTtl: 86400 * 7 // 7 days
-      });
+    // Persist to D1 so stats reflect real activity
+    if (env.DB) {
+      await env.DB.prepare(
+        "INSERT INTO events (tg_id, type, payload, created_at) VALUES (?1, ?2, ?3, ?4)"
+      ).bind(
+        data.user_id != null ? String(data.user_id) : null,
+        eventType,
+        JSON.stringify(event),
+        new Date().toISOString()
+      ).run();
     }
 
     return event;
