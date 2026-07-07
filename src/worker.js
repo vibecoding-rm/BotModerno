@@ -74,10 +74,10 @@ export default {
       const setCommands = await tg('setMyCommands', {
         commands: [
           { command: 'start', description: 'Bienvenida y menú principal' },
-          { command: 'revisar', description: 'Buscar un teléfono (en el grupo)' },
-          { command: 'subir', description: 'Proponer un teléfono (por DM)' },
+          { command: 'revisar', description: 'Buscar un teléfono' },
+          { command: 'subir', description: 'Proponer un teléfono' },
           { command: 'reglas', description: 'Ver las reglas' },
-          { command: 'exportar', description: 'Descargar la base de datos (por DM)' },
+          { command: 'exportar', description: 'Descargar la base de datos' },
           { command: 'reportar', description: 'Reportar un error en los datos' },
           { command: 'suscribir', description: 'Recibir avisos de novedades' },
           { command: 'id', description: 'Ver tu ID de Telegram' }

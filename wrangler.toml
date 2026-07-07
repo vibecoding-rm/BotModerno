@@ -10,6 +10,8 @@ NODE_ENV = "production"
 BOT_VERSION = "2.3.0"
 # Grupo autorizado: "Check de Bandas" (el bot ignora cualquier otro grupo)
 ALLOWED_CHAT_IDS = "-1003049823623"
+# En privado el bot solo responde a estos IDs (dueño/admins)
+ADMIN_TG_IDS = "778282548"
 
 # Secrets managed with `wrangler secret put ...`:
 # - BOT_TOKEN (Telegram Bot Token)

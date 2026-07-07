@@ -195,14 +195,18 @@ export class SimpleTelegramBot {
       }
     }
 
+    // En privado el bot solo responde al dueño/admins
+    if (chatType === 'private' && !this.adminIds.includes(String(userId))) return;
+
     if (text.startsWith('/')) {
       await this.onCommand({ chatId, chatType, userId, msg, text });
       return;
     }
 
-    // DM wizard text input
-    if (chatType === 'private') {
-      await this.handleWizardText(chatId, userId, text);
+    // Wizard text input (grupo o DM): solo actúa si el usuario tiene borrador activo
+    if (text) {
+      const replyTo = chatType === 'private' ? undefined : msg.message_id;
+      await this.handleWizardText(chatId, userId, text, replyTo);
     }
   }
 
@@ -262,26 +266,14 @@ export class SimpleTelegramBot {
       }
 
       case '/exportar': {
-        if (chatType === 'private') {
-          await this.sendExportOptions(chatId);
-        } else {
-          await this.sendMessage(chatId, '📥 Para exportar la base de datos, escríbeme por DM y usa /exportar.');
-        }
+        await this.sendExportOptions(chatId);
         break;
       }
       case '/subir': {
-        if (chatType !== 'private') {
-          await this.sendMessage(chatId, '💬 Para agregar un teléfono, escríbeme por DM y usa /subir ahí.');
-        } else {
-          await this.startWizard(chatId, userId);
-        }
+        await this.startWizard(chatId, userId, chatType === 'private' ? undefined : msg.message_id);
         break;
       }
       case '/revisar': {
-        if (chatType === 'private') {
-          await this.sendMessage(chatId, '🔍 El comando /revisar funciona solo en grupos. Aquí en DM usa /subir para agregar teléfonos.');
-          return;
-        }
         if (!argStr) {
           await this.sendMessage(chatId, '📝 Formato: /revisar <modelo>\n\nEjemplo: /revisar Samsung A14');
           return;
@@ -433,10 +425,11 @@ export class SimpleTelegramBot {
   }
 
   // Wizard control
-  async startWizard(chatId, userId) {
+  async startWizard(chatId, userId, replyTo) {
     await this.setDraft(userId, { step: 'awaiting_name', commercial_name: null, model: null, works: null, bands: null, provinces: null, observations: null });
     await this.sendMessage(chatId, '📲 Vamos a subir un modelo. Dime el nombre comercial (ej: "Redmi Note 12").', {
-      reply_markup: kbCancel()
+      reply_markup: kbCancel(),
+      reply_to_message_id: replyTo
     });
   }
   async cancelWizard(chatId, userId) {
@@ -444,7 +437,8 @@ export class SimpleTelegramBot {
     await this.sendMessage(chatId, 'Listo, cancelado. Puedes empezar de nuevo con /subir.');
   }
 
-  async handleWizardText(chatId, userId, text) {
+  async handleWizardText(chatId, userId, text, replyTo) {
+    const send = (t, kb) => this.sendMessage(chatId, t, { reply_markup: kb, reply_to_message_id: replyTo });
     try {
       const draft = await this.getDraft(userId);
       if (!draft) return false;
@@ -452,47 +446,47 @@ export class SimpleTelegramBot {
       switch (draft.step) {
         case 'awaiting_name': {
           if (!text || text.length < 2) {
-            await this.sendMessage(chatId, 'Por favor, envía un nombre comercial válido.', { reply_markup: kbCancel() });
+            await send('Por favor, envía un nombre comercial válido.', kbCancel());
             return true;
           }
           await this.setDraft(userId, { commercial_name: text, step: 'awaiting_model' });
-          await this.sendMessage(chatId, 'Modelo exacto (ej: "2209116AG").', { reply_markup: kbBackCancel() });
+          await send('Modelo exacto (ej: "2209116AG").', kbBackCancel());
           return true;
         }
         case 'awaiting_model': {
           if (!text || text.length < 1) {
-            await this.sendMessage(chatId, 'Modelo inválido.', { reply_markup: kbBackCancel() });
+            await send('Modelo inválido.', kbBackCancel());
             return true;
           }
           await this.setDraft(userId, { model: text, step: 'awaiting_works' });
-          await this.sendMessage(chatId, '¿Funciona en Cuba? Responde "sí" o "no".', { reply_markup: kbWorks() });
+          await send('¿Funciona en Cuba? Responde "sí" o "no".', kbWorks());
           return true;
         }
         case 'awaiting_works': {
           const yn = parseYesNo(text);
           if (yn === null) {
-            await this.sendMessage(chatId, 'Responde "sí" o "no".', { reply_markup: kbWorks() });
+            await send('Responde "sí" o "no".', kbWorks());
             return true;
           }
           if (yn) {
             await this.setDraft(userId, { works: true, step: 'awaiting_bands' });
-            await this.sendMessage(chatId, 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', { reply_markup: kbBackCancel() });
+            await send('Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', kbBackCancel());
           } else {
             await this.setDraft(userId, { works: false, step: 'awaiting_obs' });
-            await this.sendMessage(chatId, 'Añade observaciones (ej: "sin señal 4G en Holguín").', { reply_markup: kbBackCancel() });
+            await send('Añade observaciones (ej: "sin señal 4G en Holguín").', kbBackCancel());
           }
           return true;
         }
         case 'awaiting_bands': {
           const bands = text.toLowerCase() === 'desconocido' ? [] : splitNormList(text);
           await this.setDraft(userId, { bands, step: 'awaiting_provinces' });
-          await this.sendMessage(chatId, 'Indica las provincias separadas por coma (ej: La Habana, Santiago de Cuba) o escribe "-" para omitir.', { reply_markup: kbBackCancel() });
+          await send('Indica las provincias separadas por coma (ej: La Habana, Santiago de Cuba) o escribe "-" para omitir.', kbBackCancel());
           return true;
         }
         case 'awaiting_provinces': {
           const provinces = text === '-' ? [] : splitNormList(text);
           await this.setDraft(userId, { provinces, step: 'awaiting_obs' });
-          await this.sendMessage(chatId, 'Observaciones adicionales (opcional). Escribe "-" para omitir.', { reply_markup: kbBackCancel() });
+          await send('Observaciones adicionales (opcional). Escribe "-" para omitir.', kbBackCancel());
           return true;
         }
         case 'awaiting_obs': {
@@ -507,14 +501,14 @@ export class SimpleTelegramBot {
             `Bandas: ${(d.bands && d.bands.length) ? d.bands.join(', ') : '—'}\n` +
             `Provincias: ${(d.provinces && d.provinces.length) ? d.provinces.join(', ') : '—'}\n` +
             `Obs: ${d.observations || '—'}`;
-          await this.sendMessage(chatId, summary + '\n\nConfirma con el botón.', { reply_markup: kbConfirm() });
+          await send(summary + '\n\nConfirma con el botón.', kbConfirm());
           return true;
         }
         case 'confirm': {
           // If user types instead of pressing buttons, accept yes/no
           const yn = parseYesNo(text);
           if (yn === null) {
-            await this.sendMessage(chatId, 'Pulsa Confirmar o responde "sí" para confirmar o "no" para cancelar.', { reply_markup: kbConfirm() });
+            await send('Pulsa Confirmar o responde "sí" para confirmar o "no" para cancelar.', kbConfirm());
             return true;
           }
           if (yn) {
@@ -529,7 +523,7 @@ export class SimpleTelegramBot {
       }
     } catch (e) {
       logger.error('handleWizardText error', e, { chatId, userId });
-      await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
+      await send('Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
       return true;
     }
   }
@@ -541,6 +535,9 @@ export class SimpleTelegramBot {
     const chatId = msg?.chat?.id;
     const userId = cb.from?.id;
     if (!chatId || !userId) return;
+
+    // En privado solo el dueño/admins pueden usar botones (excepto verificación captcha)
+    if (msg?.chat?.type === 'private' && !data.startsWith('cap:') && !this.adminIds.includes(String(userId))) return;
 
     try {
 
@@ -744,8 +741,8 @@ Esto es de todos y para todos. ✨`;
       if (chatType === 'private') {
         await this.sendMessage(chatId, welcomeMessage, { reply_markup: welcomeKeyboard });
       } else {
-        await this.sendMessage(chatId, 'Te envié el mensaje de bienvenida por DM. 📩');
-        await this.sendMessage(userId, welcomeMessage, { reply_markup: welcomeKeyboard });
+        // En grupo: bienvenida corta en el propio grupo (sin DMs no solicitados)
+        await this.sendMessage(chatId, this.getShortRules());
       }
     } catch (error) {
       logger.error('Error fetching welcome message from database', error);
@@ -792,9 +789,7 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
         await this.sendMessage(chatId, defaultWelcome, { reply_markup: welcomeKeyboard });
         await this.sendMessage(chatId, defaultRulesAndCommands);
       } else {
-        await this.sendMessage(chatId, 'Te envié el mensaje de bienvenida por DM. 📩');
-        await this.sendMessage(userId, defaultWelcome, { reply_markup: welcomeKeyboard });
-        await this.sendMessage(userId, defaultRulesAndCommands);
+        await this.sendMessage(chatId, this.getShortRules());
       }
     }
   }
@@ -811,22 +806,13 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
         '4) Usa /reportar para avisar de errores.\n' +
         '5) La base es de todos, nadie puede privatizarla.';
 
-      if (chatType === 'private') {
-        await this.sendMessage(userId, rules);
-      } else {
-        await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
-        await this.sendMessage(userId, rules);
-      }
+      // Reglas directamente en el chat donde se pidieron
+      await this.sendMessage(chatType === 'private' ? userId : chatId, rules);
     } catch (error) {
       logger.error('Error fetching rules from database', error);
       // Fallback to default rules
       const defaultRules = '📜 Reglas:\n1) Respeto; nada de insultos ni spam.\n2) No ventas, solo compatibilidad de teléfonos en Cuba.\n3) Aporta datos reales con /subir.\n4) Usa /reportar para avisar de errores.\n5) La base es de todos, nadie puede privatizarla.';
-      if (chatType === 'private') {
-        await this.sendMessage(userId, defaultRules);
-      } else {
-        await this.sendMessage(chatId, 'Te envié las reglas por DM. 📩');
-        await this.sendMessage(userId, defaultRules);
-      }
+      await this.sendMessage(chatType === 'private' ? userId : chatId, defaultRules);
     }
   }
 
@@ -881,18 +867,18 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
 
 🤖 **Comandos principales:**
 • /start - Mensaje de bienvenida
-• /subir - Agregar teléfono (solo DM)
-• /revisar <modelo> - Buscar teléfonos (solo grupos)
+• /subir - Agregar teléfono
+• /revisar <modelo> - Buscar teléfonos
 • /reglas - Ver reglas completas
-• /exportar - Exportar base de datos (solo DM)
+• /exportar - Exportar base de datos
 • /id - Ver información de IDs
 • /reportar - Reportar problema
 
 📱 **Cómo usar:**
-1. **Agregar teléfono:** Escríbeme por DM y usa /subir
-2. **Buscar teléfonos:** En el grupo usa /revisar Samsung A14
-3. **Ver reglas:** Usa /reglas o el botón en el mensaje de bienvenida
-4. **Exportar datos:** Usa /exportar o el botón "📥 Exportar Base"
+1. **Agregar teléfono:** Usa /subir en el grupo y sigue los pasos
+2. **Buscar teléfonos:** Usa /revisar Samsung A14
+3. **Ver reglas:** Usa /reglas
+4. **Exportar datos:** Usa /exportar y elige el formato
 
 🔧 **Para administradores:**
 • /fijar - Mostrar reglas cortas en grupo
@@ -985,13 +971,8 @@ Selecciona el formato que prefieras para descargar la información:
   }
 
   async exportToCSV() {
-    let phones;
-    try {
-      const res = await this.db.prepare("SELECT * FROM phones WHERE status = 'approved' ORDER BY created_at DESC").all();
-      phones = res.results || [];
-    } catch (e) {
-      throw e;
-    }
+    const res = await this.db.prepare("SELECT * FROM phones WHERE status = 'approved' ORDER BY created_at DESC").all();
+    const phones = res.results || [];
 
     const headers = ['ID', 'Nombre', 'Modelo', 'Funciona', 'Bandas', 'Provincias', 'Observaciones', 'Fecha Creación', 'Estado'];
     const csvRows = [headers.join(',')];
@@ -1002,7 +983,9 @@ Selecciona el formato que prefieras para descargar la información:
         try {
           const parsed = JSON.parse(v);
           if (Array.isArray(parsed)) return parsed.join(', ');
-        } catch (e) {}
+        } catch {
+          return v;
+        }
       }
       return Array.isArray(v) ? v.join(', ') : (v || '');
     };
@@ -1026,13 +1009,8 @@ Selecciona el formato que prefieras para descargar la información:
   }
 
   async exportToJSON() {
-    let phones;
-    try {
-      const res = await this.db.prepare("SELECT * FROM phones WHERE status = 'approved' ORDER BY created_at DESC").all();
-      phones = res.results || [];
-    } catch (e) {
-      throw e;
-    }
+    const res = await this.db.prepare("SELECT * FROM phones WHERE status = 'approved' ORDER BY created_at DESC").all();
+    const phones = res.results || [];
 
     const parsedPhones = phones.map(phone => {
       let bands = phone.bands;
