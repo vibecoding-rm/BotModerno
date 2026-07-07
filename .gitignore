@@ -134,3 +134,4 @@ temp/
 backup/
 dist-check/
 .agents/
+web-panel/.env.local
