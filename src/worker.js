@@ -90,6 +90,35 @@ export default {
       });
     }
 
+    // Admin: GET /chat-info/<secret> -> estado del bot en cada chat de ALLOWED_CHAT_IDS
+    const chatInfoMatch = url.pathname.match(/^\/chat-info\/(.+)$/);
+    if (request.method === 'GET' && chatInfoMatch) {
+      if (chatInfoMatch[1] !== expectedSecret) return new Response('Not found', { status: 404 });
+      const tg = (method, payload) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(r => r.json());
+
+      const me = await tg('getMe', {});
+      const ids = (env.ALLOWED_CHAT_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+      const chats = {};
+      for (const id of ids) {
+        const chat = await tg('getChat', { chat_id: Number(id) });
+        const member = me?.result?.id
+          ? await tg('getChatMember', { chat_id: Number(id), user_id: me.result.id })
+          : null;
+        chats[id] = {
+          chat: chat.ok ? { title: chat.result?.title, type: chat.result?.type } : chat,
+          bot_status: member?.ok ? member.result?.status : member
+        };
+      }
+      return new Response(JSON.stringify({ bot: me?.result?.username, chats }, null, 2), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     // 1) Validación por ruta: /webhook/<secret>
     const pathParts = url.pathname.split('/').filter(Boolean); // e.g. ["webhook", "<secret>"]
     const pathSecret = pathParts[1] || '';

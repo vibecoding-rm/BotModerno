@@ -8,7 +8,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 NODE_ENV = "production"
 BOT_VERSION = "2.3.0"
-ALLOWED_CHAT_IDS = "-1003049823623,-1003369990770"
+# Grupo autorizado: "Check de Bandas" (el bot ignora cualquier otro grupo)
+ALLOWED_CHAT_IDS = "-1003049823623"
 
 # Secrets managed with `wrangler secret put ...`:
 # - BOT_TOKEN (Telegram Bot Token)
