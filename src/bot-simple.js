@@ -91,6 +91,23 @@ function kbConfirm() {
     { text: 'Cancelar', callback_data: 'wiz:cancel' }
   ]] };
 }
+function kbModeration(id) {
+  return { inline_keyboard: [
+    [
+      { text: '✅ Aprobar', callback_data: `mod:approve:${id}` },
+      { text: '❌ Rechazar', callback_data: `mod:reject:${id}` }
+    ],
+    [
+      { text: '⏭ Saltar', callback_data: `mod:next:${id}` }
+    ]
+  ] };
+}
+function parseJsonArray(v) {
+  if (typeof v === 'string') {
+    try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+  }
+  return Array.isArray(v) ? v : [];
+}
 
 export class SimpleTelegramBot {
   constructor(env) {
@@ -287,6 +304,14 @@ export class SimpleTelegramBot {
       }
       case '/reportar': {
         await this.handleReport(chatId, userId, argStr);
+        break;
+      }
+      case '/pendientes': {
+        if (!this.isAdmin(userId)) {
+          if (chatType === 'private') await this.sendMessage(chatId, '❌ Solo los administradores pueden usar este comando.');
+          return;
+        }
+        await this.sendPendingReview(chatId, 0);
         break;
       }
       case '/suscribir': {
@@ -540,6 +565,13 @@ export class SimpleTelegramBot {
     if (msg?.chat?.type === 'private' && !data.startsWith('cap:') && !this.adminIds.includes(String(userId))) return;
 
     try {
+
+      // Moderation buttons (solo admins)
+      if (data.startsWith('mod:')) {
+        await this.answerCallbackQuery(id, this.isAdmin(userId) ? {} : { text: 'Solo administradores.', show_alert: true });
+        await this.handleModCallback(chatId, userId, data, msg);
+        return;
+      }
 
       // Export buttons
       if (data.startsWith('export:')) {
@@ -881,6 +913,7 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
 4. **Exportar datos:** Usa /exportar y elige el formato
 
 🔧 **Para administradores:**
+• /pendientes - Revisar propuestas pendientes (aprobar/rechazar)
 • /fijar - Mostrar reglas cortas en grupo
 • /id - Ver información detallada
 
@@ -1309,10 +1342,12 @@ Selecciona el formato que prefieras para descargar la información:
 
     const nombreComercial = normalizeText(payload.commercial_name);
 
+    let insertedId = null;
     try {
-      await this.db.prepare(
-        "INSERT INTO phones (commercial_name, model, works, bands, provinces, observations, nombre_comercial, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
-      ).bind(payload.commercial_name, payload.model, worksInt, bandsStr, provincesStr, payload.observations, nombreComercial, createdAt).run();
+      const row = await this.db.prepare(
+        "INSERT INTO phones (commercial_name, model, works, bands, provinces, observations, nombre_comercial, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) RETURNING id"
+      ).bind(payload.commercial_name, payload.model, worksInt, bandsStr, provincesStr, payload.observations, nombreComercial, createdAt).first();
+      insertedId = row?.id;
     } catch (error) {
       if (/unique constraint|duplicate key/i.test(String(error))) {
         await this.clearDraft(userId);
@@ -1326,6 +1361,123 @@ Selecciona el formato que prefieras para descargar la información:
 
     await this.clearDraft(userId);
     await this.sendMessage(chatId, '¡Hecho! Tu propuesta quedó guardada y pasará a revisión. ✅\nCuando un admin la apruebe aparecerá en /revisar.');
+    if (insertedId) await this.notifyAdminsNewSubmission(insertedId);
+  }
+
+  // --- Moderación (solo admins) ---
+  isAdmin(userId) {
+    return this.adminIds.includes(String(userId));
+  }
+
+  formatPhoneReview(p, pendingCount) {
+    const bands = parseJsonArray(p.bands);
+    const provinces = parseJsonArray(p.provinces);
+    const works = p.works === 1 || p.works === true ? '✅ Sí' : '❌ No';
+    const txt = `📋 Propuesta #${p.id}` + (pendingCount != null ? ` (${pendingCount} pendientes)` : '') + '\n\n' +
+      `📱 Nombre: ${p.commercial_name}\n` +
+      `🔢 Modelo: ${p.model || '—'}\n` +
+      `🇨🇺 Funciona: ${works}\n` +
+      `📡 Bandas: ${bands.length ? bands.join(', ') : '—'}\n` +
+      `📍 Provincias: ${provinces.length ? provinces.join(', ') : '—'}\n` +
+      `📝 Obs: ${p.observations || '—'}\n` +
+      `📅 Enviado: ${p.created_at || '—'}`;
+    return txt;
+  }
+
+  async countPending() {
+    const row = await this.db.prepare("SELECT COUNT(*) AS n FROM phones WHERE status = 'pending'").first();
+    return row?.n || 0;
+  }
+
+  async sendPendingReview(chatId, afterId = 0) {
+    const pending = await this.countPending();
+    if (!pending) {
+      await this.sendMessage(chatId, '🎉 No hay propuestas pendientes. ¡Todo revisado!');
+      return;
+    }
+    let next = await this.db.prepare(
+      "SELECT * FROM phones WHERE status = 'pending' AND id > ?1 ORDER BY id LIMIT 1"
+    ).bind(afterId).first();
+    if (!next) {
+      // Fin de la cola: reempezar desde el principio (quedan saltados)
+      next = await this.db.prepare("SELECT * FROM phones WHERE status = 'pending' ORDER BY id LIMIT 1").first();
+    }
+    await this.sendMessage(chatId, this.formatPhoneReview(next, pending), { reply_markup: kbModeration(next.id) });
+  }
+
+  async handleModCallback(chatId, userId, data, msg) {
+    if (!this.isAdmin(userId)) return;
+    const [, action, idStr] = data.split(':');
+    const id = Number(idStr);
+
+    if (action === 'next') {
+      // Quitar botones del actual y mostrar el siguiente
+      if (msg?.message_id) await this.editMessageReplyMarkup(chatId, msg.message_id, { inline_keyboard: [] });
+      await this.sendPendingReview(chatId, id);
+      return;
+    }
+
+    if (action !== 'approve' && action !== 'reject') return;
+    const phone = await this.db.prepare("SELECT * FROM phones WHERE id = ?1").bind(id).first();
+    if (!phone) {
+      await this.sendMessage(chatId, `La propuesta #${id} ya no existe.`);
+      return;
+    }
+    if (phone.status !== 'pending') {
+      await this.sendMessage(chatId, `La propuesta #${id} ya fue revisada (${phone.status}).`);
+      return;
+    }
+
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    await this.db.prepare("UPDATE phones SET status = ?1 WHERE id = ?2").bind(newStatus, id).run();
+
+    const verdict = action === 'approve' ? '✅ APROBADO' : '❌ RECHAZADO';
+    if (msg?.message_id) {
+      await this.editMessageText(chatId, msg.message_id, this.formatPhoneReview(phone) + `\n\n${verdict}`);
+    }
+
+    if (action === 'approve') {
+      await this.notifySubscribers(phone);
+    }
+
+    // Mostrar el siguiente pendiente automáticamente
+    await this.sendPendingReview(chatId, id);
+  }
+
+  async notifySubscribers(phone) {
+    try {
+      const res = await this.db.prepare("SELECT tg_id FROM subscriptions LIMIT 100").all();
+      const subs = res.results || [];
+      if (!subs.length) return;
+      const bands = parseJsonArray(phone.bands);
+      const works = phone.works === 1 || phone.works === true ? '✅ funciona' : '❌ no funciona';
+      const txt = `📢 Nuevo teléfono en la base:\n\n📱 ${phone.commercial_name}` +
+        (phone.model ? ` (${phone.model})` : '') +
+        `\n🇨🇺 ${works} en Cuba` +
+        (bands.length ? `\n📡 Bandas: ${bands.join(', ')}` : '') +
+        '\n\nUsa /revisar en el grupo para verlo.';
+      for (const s of subs) {
+        // Puede fallar si el usuario nunca inició el bot; se ignora
+        await this.sendMessage(s.tg_id, txt);
+      }
+    } catch (e) {
+      logger.error('notifySubscribers error', e);
+    }
+  }
+
+  async notifyAdminsNewSubmission(phoneId) {
+    try {
+      const phone = await this.db.prepare("SELECT * FROM phones WHERE id = ?1").bind(phoneId).first();
+      if (!phone) return;
+      const pending = await this.countPending();
+      for (const adminId of this.adminIds) {
+        await this.sendMessage(adminId, '🆕 Nueva propuesta recibida:\n\n' + this.formatPhoneReview(phone, pending), {
+          reply_markup: kbModeration(phone.id)
+        });
+      }
+    } catch (e) {
+      logger.error('notifyAdminsNewSubmission error', e);
+    }
   }
 
   async handleReport(chatId, userId, text) {

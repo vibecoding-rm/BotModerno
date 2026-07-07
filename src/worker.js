@@ -71,20 +71,31 @@ export default {
         allowed_updates: ['message', 'callback_query', 'chat_join_request'],
         drop_pending_updates: true
       });
-      const setCommands = await tg('setMyCommands', {
-        commands: [
-          { command: 'start', description: 'Bienvenida y menú principal' },
-          { command: 'revisar', description: 'Buscar un teléfono' },
-          { command: 'subir', description: 'Proponer un teléfono' },
-          { command: 'reglas', description: 'Ver las reglas' },
-          { command: 'exportar', description: 'Descargar la base de datos' },
-          { command: 'reportar', description: 'Reportar un error en los datos' },
-          { command: 'suscribir', description: 'Recibir avisos de novedades' },
-          { command: 'id', description: 'Ver tu ID de Telegram' }
-        ]
-      });
+      const publicCommands = [
+        { command: 'start', description: 'Bienvenida y menú principal' },
+        { command: 'revisar', description: 'Buscar un teléfono' },
+        { command: 'subir', description: 'Proponer un teléfono' },
+        { command: 'reglas', description: 'Ver las reglas' },
+        { command: 'exportar', description: 'Descargar la base de datos' },
+        { command: 'reportar', description: 'Reportar un error en los datos' },
+        { command: 'suscribir', description: 'Recibir avisos de novedades' },
+        { command: 'id', description: 'Ver tu ID de Telegram' }
+      ];
+      const setCommands = await tg('setMyCommands', { commands: publicCommands });
+      // Comandos extra visibles solo para admins (en su chat privado)
+      const adminIds = (env.ADMIN_TG_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+      const setAdminCommands = [];
+      for (const adminId of adminIds) {
+        setAdminCommands.push(await tg('setMyCommands', {
+          scope: { type: 'chat', chat_id: Number(adminId) },
+          commands: [
+            { command: 'pendientes', description: '🔧 Revisar propuestas pendientes' },
+            ...publicCommands
+          ]
+        }));
+      }
       const info = await tg('getWebhookInfo', {});
-      return new Response(JSON.stringify({ setWebhook, setCommands, webhookInfo: info }, null, 2), {
+      return new Response(JSON.stringify({ setWebhook, setCommands, setAdminCommands, webhookInfo: info }, null, 2), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
