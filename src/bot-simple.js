@@ -73,6 +73,18 @@ function kbBackCancel() {
     { text: 'Cancelar', callback_data: 'wiz:cancel' }
   ]] };
 }
+function kbWorks() {
+  return { inline_keyboard: [
+    [
+      { text: '👍 Sí', callback_data: 'wiz:works_yes' },
+      { text: '👎 No', callback_data: 'wiz:works_no' }
+    ],
+    [
+      { text: 'Atrás', callback_data: 'wiz:back' },
+      { text: 'Cancelar', callback_data: 'wiz:cancel' }
+    ]
+  ] };
+}
 function kbConfirm() {
   return { inline_keyboard: [[
     { text: 'Atrás', callback_data: 'wiz:back' },
@@ -181,7 +193,7 @@ export class SimpleTelegramBot {
     // If user has not passed captcha, block messages and remind
     if ((chatType === 'group' || chatType === 'supergroup') && userId) {
       const pending = await this.kvGet(`captcha:${chatId}:${userId}`);
-      if (pending === 'pending') {
+      if (pending) {
         if (msg.message_id) await this.deleteMessage(chatId, msg.message_id);
         // remind silently
         await this.sendMessage(chatId, `⏳ @${msg.from?.username || userId} verifica en tu DM para participar.`, {});
@@ -312,14 +324,15 @@ export class SimpleTelegramBot {
   async searchByModel(chatId, query) {
     try {
       const q = normalizeText(query);
-      // Fetch candidate rows and filter on edge to ensure accent/space-insensitive matching
       const { data, error } = await this.supabase
         .from('phones')
         .select('id, commercial_name, model, works, bands, provinces, observations, created_at')
-        .limit(2000);
+        .eq('status', 'approved')
+        .or('nombre_comercial.ilike.%' + q + '%,model.ilike.%' + q + '%')
+        .limit(50);
       if (error) throw error;
 
-      const matches = (data || []).filter(r => normalizeText(r.model) .includes(q));
+      const matches = data || [];
 
       if (!matches.length) {
         await this.sendMessage(chatId, 'No encontramos ese modelo. ¿Quieres usar /subir para proponerlo?');
@@ -410,13 +423,13 @@ export class SimpleTelegramBot {
             return true;
           }
           await this.setDraft(userId, { model: text, step: 'awaiting_works' });
-          await this.sendMessage(chatId, '¿Funciona en Cuba? Responde "sí" o "no".', { reply_markup: kbBackCancel() });
+          await this.sendMessage(chatId, '¿Funciona en Cuba? Responde "sí" o "no".', { reply_markup: kbWorks() });
           return true;
         }
         case 'awaiting_works': {
           const yn = parseYesNo(text);
           if (yn === null) {
-            await this.sendMessage(chatId, 'Responde "sí" o "no".', { reply_markup: kbBackCancel() });
+            await this.sendMessage(chatId, 'Responde "sí" o "no".', { reply_markup: kbWorks() });
             return true;
           }
           if (yn) {
@@ -583,7 +596,7 @@ export class SimpleTelegramBot {
             await this.sendMessage(chatId, 'Modelo exacto (ej: "2209116AG").', { reply_markup: kbBackCancel() });
             break;
           case 'awaiting_works':
-            await this.sendMessage(chatId, '¿Funciona en Cuba? Responde "sí" o "no".', { reply_markup: kbBackCancel() });
+            await this.sendMessage(chatId, '¿Funciona en Cuba? Responde "sí" o "no".', { reply_markup: kbWorks() });
             break;
           case 'awaiting_bands':
             await this.sendMessage(chatId, 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', { reply_markup: kbBackCancel() });
@@ -594,6 +607,20 @@ export class SimpleTelegramBot {
           case 'awaiting_obs':
             await this.sendMessage(chatId, 'Observaciones (opcional). Escribe "-" para omitir.', { reply_markup: kbBackCancel() });
             break;
+        }
+        return;
+      }
+      if (data === 'wiz:works_yes') {
+        if (draft.step === 'awaiting_works') {
+          await this.setDraft(userId, { works: true, step: 'awaiting_bands' });
+          await this.sendMessage(chatId, 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', { reply_markup: kbBackCancel() });
+        }
+        return;
+      }
+      if (data === 'wiz:works_no') {
+        if (draft.step === 'awaiting_works') {
+          await this.setDraft(userId, { works: false, step: 'awaiting_obs' });
+          await this.sendMessage(chatId, 'Añade observaciones (ej: "sin señal 4G en Holguín").', { reply_markup: kbBackCancel() });
         }
         return;
       }
@@ -612,8 +639,15 @@ export class SimpleTelegramBot {
     const chat = { id: req.chat?.id, type: req.chat?.type, title: req.chat?.title };
     // Try to approve (ignore errors silently)
     await tgFetch(this.token, 'approveChatJoinRequest', { chat_id: chat.id, user_id: user.id });
-    await this.welcomeUserDM(user, chat);
-    await this.startCaptcha(user, chat);
+    try {
+      await this.welcomeUserDM(user, chat);
+      await this.startCaptcha(user, chat);
+    } catch (err) {
+      logger.warn('Failed to send welcome/captcha via DM', { error: err.message, userId: user.id });
+      const mention = user.username ? `@${user.username}` : (user.first_name || 'usuario');
+      const fallbackMsg = `⚠️ Hola ${mention}, no pude enviarte un mensaje privado de verificación. Por favor, inicia un chat privado conmigo primero para que pueda enviarte el captcha.`;
+      await this.sendMessage(chat.id, fallbackMsg);
+    }
   }
 
   async sendWelcomeMessage(chatId, userId, chatType) {
@@ -1139,6 +1173,44 @@ Selecciona el formato que prefieras para descargar la información:
       headers: { 'Authorization': `Bearer ${this.kvToken}` }
     });
   }
+  async kvKeys(pattern) {
+    if (!this.kvUrl || !this.kvToken) return [];
+    const res = await fetch(`${this.kvUrl}/keys/${encodeURIComponent(pattern)}`, {
+      headers: { 'Authorization': `Bearer ${this.kvToken}` }
+    });
+    const json = await res.json().catch(() => null);
+    return json?.result ?? [];
+  }
+  async kickExpiredCaptchas() {
+    try {
+      const keys = await this.kvKeys('captcha:*');
+      if (!keys || !keys.length) return;
+
+      for (const key of keys) {
+        const val = await this.kvGet(key);
+        if (val && Date.now() > Number(val)) {
+          const parts = key.split(':');
+          if (parts.length === 3) {
+            const chatId = Number(parts[1]);
+            const userId = Number(parts[2]);
+            logger.info('Kicking expired captcha user', { chatId, userId });
+
+            // ban + unban user
+            await tgFetch(this.token, 'banChatMember', { chat_id: chatId, user_id: userId });
+            await tgFetch(this.token, 'unbanChatMember', { chat_id: chatId, user_id: userId });
+
+            // delete key
+            await this.kvDel(key);
+
+            // send private message
+            await this.sendMessage(userId, '❌ El tiempo de verificación ha expirado y has sido expulsado. Puedes volver a unirte al grupo.');
+          }
+        }
+      }
+    } catch (e) {
+      logger.error('Error in kickExpiredCaptchas', e);
+    }
+  }
 
   captchaKeyboard(chatId, userId) {
     return {
@@ -1157,8 +1229,9 @@ Selecciona el formato que prefieras para descargar la información:
     }
   }
   async startCaptcha(user, chat) {
-    // Mark as pending with TTL 2 minutes
-    await this.kvSet(`captcha:${chat.id}:${user.id}`, 'pending', 120);
+    // Save expiration timestamp and a long TTL (e.g. 86400)
+    const expiration = Date.now() + 120000;
+    await this.kvSet(`captcha:${chat.id}:${user.id}`, String(expiration), 86400);
     const dm =
       '🔐 **Verificación de seguridad**\n\n' +
       'Antes de participar en el grupo, confirma que eres humano.\n' +

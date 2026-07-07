@@ -20,6 +20,8 @@ async function handleUpdate(update, env) {
     SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
     ADMIN_TG_IDS: env.ADMIN_TG_IDS,
     ALLOWED_CHAT_IDS: env.ALLOWED_CHAT_IDS,
+    VERCEL_KV_REST_API_URL: env.VERCEL_KV_REST_API_URL,
+    VERCEL_KV_REST_API_TOKEN: env.VERCEL_KV_REST_API_TOKEN,
   };
   const bot = new SimpleTelegramBot(botEnv);
   const validation = validate(telegramUpdateSchema, update);
@@ -109,5 +111,18 @@ export default {
       ctx.waitUntil(logEvent(env, 'error', { where: 'handleUpdate', error: String(e) }));
       return new Response('OK', { status: 200 });
     }
+  },
+  async scheduled(event, env, ctx) {
+    const botEnv = {
+      BOT_TOKEN: env.BOT_TOKEN,
+      SUPABASE_URL: env.SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+      ADMIN_TG_IDS: env.ADMIN_TG_IDS,
+      ALLOWED_CHAT_IDS: env.ALLOWED_CHAT_IDS,
+      VERCEL_KV_REST_API_URL: env.VERCEL_KV_REST_API_URL,
+      VERCEL_KV_REST_API_TOKEN: env.VERCEL_KV_REST_API_TOKEN,
+    };
+    const bot = new SimpleTelegramBot(botEnv);
+    ctx.waitUntil(bot.kickExpiredCaptchas());
   }
 }
