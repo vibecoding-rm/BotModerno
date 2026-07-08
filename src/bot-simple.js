@@ -152,6 +152,12 @@ function parseJsonArray(v) {
   return Array.isArray(v) ? v : [];
 }
 
+// Exportados para tests unitarios
+export {
+  normalizeText, toUpperModel, parseYesNo, splitNormList,
+  parseProvincesText, parseJsonArray, kbProvinces, CUBA_PROVINCES
+};
+
 export class SimpleTelegramBot {
   constructor(env) {
     this.token = env.BOT_TOKEN;

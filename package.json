@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "start": "wrangler dev",
-    "test": "jest",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config tests/jest.config.cjs",
     "test:e2e": "playwright test",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
