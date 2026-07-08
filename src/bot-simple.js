@@ -422,7 +422,9 @@ export class SimpleTelegramBot {
         const bands = r.bands.length ? r.bands.join(', ') : '—';
         const provs = r.provinces.length ? r.provinces.join(', ') : '—';
         const obs = r.observations ? ` | Obs: ${r.observations}` : '';
-        return `• ${r.commercial_name}${r.model ? ` (${r.model})` : ''} ${w}\n  Bandas: ${bands}\n  Prov: ${provs}${obs}`;
+        // Omitir el modelo cuando es idéntico al nombre (filas cuyo nombre ES el código)
+        const showModel = r.model && r.model.toUpperCase() !== (r.commercial_name || '').trim().toUpperCase();
+        return `• ${r.commercial_name}${showModel ? ` (${r.model})` : ''} ${w}\n  Bandas: ${bands}\n  Prov: ${provs}${obs}`;
       });
 
       const from = offset + 1;
