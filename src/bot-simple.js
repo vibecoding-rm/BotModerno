@@ -91,6 +91,49 @@ function kbConfirm() {
     { text: 'Cancelar', callback_data: 'wiz:cancel' }
   ]] };
 }
+const CUBA_PROVINCES = [
+  'Pinar del Río', 'Artemisa', 'La Habana', 'Mayabeque',
+  'Matanzas', 'Cienfuegos', 'Villa Clara', 'Sancti Spíritus',
+  'Ciego de Ávila', 'Camagüey', 'Las Tunas', 'Holguín',
+  'Granma', 'Santiago de Cuba', 'Guantánamo', 'Isla de la Juventud'
+];
+// Provincias escritas a mano: separa solo por comas y mapea al nombre canónico
+function parseProvincesText(txt) {
+  if (!txt || txt.trim() === '') return [];
+  const byNorm = new Map(CUBA_PROVINCES.map(p => [normalizeText(p), p]));
+  const out = [];
+  for (const part of String(txt).split(/[,;|\n]+/)) {
+    const norm = normalizeText(part);
+    if (!norm) continue;
+    const canonical = byNorm.get(norm) || part.trim();
+    if (!out.includes(canonical)) out.push(canonical);
+  }
+  return out;
+}
+// Teclado multi-selección de provincias; ownerId evita que otros toquen el wizard ajeno
+function kbProvinces(selected = [], ownerId = '') {
+  const rows = [];
+  for (let i = 0; i < CUBA_PROVINCES.length; i += 2) {
+    const row = [];
+    for (const j of [i, i + 1]) {
+      if (j < CUBA_PROVINCES.length) {
+        const name = CUBA_PROVINCES[j];
+        const on = selected.includes(name);
+        row.push({ text: (on ? '✅ ' : '') + name, callback_data: `prov:t:${j}:${ownerId}` });
+      }
+    }
+    rows.push(row);
+  }
+  rows.push([
+    { text: '✔️ Listo', callback_data: `prov:done::${ownerId}` },
+    { text: 'Omitir', callback_data: `prov:skip::${ownerId}` }
+  ]);
+  rows.push([
+    { text: 'Atrás', callback_data: 'wiz:back' },
+    { text: 'Cancelar', callback_data: 'wiz:cancel' }
+  ]);
+  return { inline_keyboard: rows };
+}
 function kbModeration(id) {
   return { inline_keyboard: [
     [
@@ -306,6 +349,15 @@ export class SimpleTelegramBot {
         await this.handleReport(chatId, userId, argStr);
         break;
       }
+      case '/bandas': {
+        await this.sendBandsGuide(chatId);
+        break;
+      }
+      case '/ayuda':
+      case '/help': {
+        await this.sendHelp(chatId);
+        break;
+      }
       case '/pendientes': {
         if (!this.isAdmin(userId)) {
           if (chatType === 'private') await this.sendMessage(chatId, '❌ Solo los administradores pueden usar este comando.');
@@ -331,48 +383,62 @@ export class SimpleTelegramBot {
     }
   }
 
-  // Search by model (case/accents-insensitive)
-  async searchByModel(chatId, query) {
+  // Search by model (case/accents-insensitive) with pagination
+  async searchByModel(chatId, query, offset = 0, editMessageId = null) {
     try {
+      const PAGE = 6;
       const q = normalizeText(query);
-      const res = await this.db.prepare(
-        "SELECT id, commercial_name, model, works, bands, provinces, observations, created_at FROM phones WHERE status = 'approved' AND (nombre_comercial LIKE ?1 OR model LIKE ?1) LIMIT 50"
-      ).bind('%' + q + '%').all();
-      
-      const rawMatches = res.results || [];
-      const matches = rawMatches.map(r => {
-        let bands = r.bands;
-        if (typeof bands === 'string') {
-          try { bands = JSON.parse(bands); } catch (e) { bands = []; }
-        }
-        let provinces = r.provinces;
-        if (typeof provinces === 'string') {
-          try { provinces = JSON.parse(provinces); } catch (e) { provinces = []; }
-        }
-        return {
-          ...r,
-          bands: Array.isArray(bands) ? bands : [],
-          provinces: Array.isArray(provinces) ? provinces : [],
-          works: r.works === 1 || r.works === true ? true : (r.works === 0 || r.works === false ? false : null)
-        };
-      });
+      const like = '%' + q + '%';
 
-      if (!matches.length) {
+      const countRow = await this.db.prepare(
+        "SELECT COUNT(*) AS n FROM phones WHERE status = 'approved' AND (nombre_comercial LIKE ?1 OR model LIKE ?1)"
+      ).bind(like).first();
+      const total = countRow?.n || 0;
+
+      if (!total) {
         await this.sendMessage(chatId, 'No encontramos ese modelo. ¿Quieres usar /subir para proponerlo?');
         return;
       }
 
-      // Build a compact response to avoid spam in groups
-      const lines = matches.slice(0, 8).map(r => {
+      const res = await this.db.prepare(
+        "SELECT id, commercial_name, model, works, bands, provinces, observations FROM phones WHERE status = 'approved' AND (nombre_comercial LIKE ?1 OR model LIKE ?1) ORDER BY commercial_name LIMIT ?2 OFFSET ?3"
+      ).bind(like, PAGE, offset).all();
+
+      const matches = (res.results || []).map(r => ({
+        ...r,
+        bands: parseJsonArray(r.bands),
+        provinces: parseJsonArray(r.provinces),
+        works: r.works === 1 || r.works === true ? true : (r.works === 0 || r.works === false ? false : null)
+      }));
+
+      const lines = matches.map(r => {
         const w = r.works === true ? '✅' : (r.works === false ? '❌' : '❓');
-        const bands = Array.isArray(r.bands) ? r.bands.join(', ') : (r.bands || '—');
-        const provs = Array.isArray(r.provinces) ? r.provinces.join(', ') : (r.provinces || '—');
+        const bands = r.bands.length ? r.bands.join(', ') : '—';
+        const provs = r.provinces.length ? r.provinces.join(', ') : '—';
         const obs = r.observations ? ` | Obs: ${r.observations}` : '';
-        return `• ${r.commercial_name} (${r.model}) ${w}\n  Bandas: ${bands}\n  Prov: ${provs}${obs}`;
+        return `• ${r.commercial_name}${r.model ? ` (${r.model})` : ''} ${w}\n  Bandas: ${bands}\n  Prov: ${provs}${obs}`;
       });
-      let msg = '🔎 Resultados por modelo:\n\n' + lines.join('\n\n');
-      if (matches.length > lines.length) msg += `\n\n(+${matches.length - lines.length} más...)`;
-      await this.sendMessage(chatId, msg);
+
+      const from = offset + 1;
+      const to = offset + matches.length;
+      let msgText = `🔎 "${query}" — ${from}-${to} de ${total}\n\n` + lines.join('\n\n');
+
+      // Botones de paginación (callback data máx 64 BYTES: recortar query en UTF-8)
+      let qShort = query;
+      const enc = new TextEncoder();
+      while (qShort && enc.encode(`pg:${offset + PAGE}:${qShort}`).length > 64) {
+        qShort = qShort.slice(0, -1);
+      }
+      const navRow = [];
+      if (offset > 0) navRow.push({ text: '◀ Anterior', callback_data: `pg:${Math.max(0, offset - PAGE)}:${qShort}` });
+      if (to < total) navRow.push({ text: 'Siguiente ▶', callback_data: `pg:${offset + PAGE}:${qShort}` });
+      const kb = navRow.length ? { inline_keyboard: [navRow] } : undefined;
+
+      if (editMessageId) {
+        await this.editMessageText(chatId, editMessageId, msgText, { reply_markup: kb });
+      } else {
+        await this.sendMessage(chatId, msgText, { reply_markup: kb });
+      }
     } catch (e) {
       logger.error('searchByModel error', e, { chatId });
       await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
@@ -504,12 +570,12 @@ export class SimpleTelegramBot {
         }
         case 'awaiting_bands': {
           const bands = text.toLowerCase() === 'desconocido' ? [] : splitNormList(text);
-          await this.setDraft(userId, { bands, step: 'awaiting_provinces' });
-          await send('Indica las provincias separadas por coma (ej: La Habana, Santiago de Cuba) o escribe "-" para omitir.', kbBackCancel());
+          await this.setDraft(userId, { bands, provinces: [], step: 'awaiting_provinces' });
+          await send('📍 ¿En qué provincias lo probaste? Toca para marcar/desmarcar y pulsa "✔️ Listo" (o escribe los nombres separados por coma).', kbProvinces([], userId));
           return true;
         }
         case 'awaiting_provinces': {
-          const provinces = text === '-' ? [] : splitNormList(text);
+          const provinces = text === '-' ? [] : parseProvincesText(text);
           await this.setDraft(userId, { provinces, step: 'awaiting_obs' });
           await send('Observaciones adicionales (opcional). Escribe "-" para omitir.', kbBackCancel());
           return true;
@@ -565,6 +631,46 @@ export class SimpleTelegramBot {
     if (msg?.chat?.type === 'private' && !data.startsWith('cap:') && !this.adminIds.includes(String(userId))) return;
 
     try {
+
+      // Paginación de /revisar (cualquiera puede pasar páginas)
+      if (data.startsWith('pg:')) {
+        await this.answerCallbackQuery(id);
+        const parts = data.split(':');
+        const offset = Number(parts[1]) || 0;
+        const query = parts.slice(2).join(':');
+        if (query) await this.searchByModel(chatId, query, offset, msg?.message_id);
+        return;
+      }
+
+      // Selección de provincias en el wizard
+      if (data.startsWith('prov:')) {
+        const parts = data.split(':'); // prov:<t|done|skip>:<idx|''>:<ownerId>
+        const action = parts[1];
+        const ownerId = parts[3];
+        if (ownerId && String(userId) !== ownerId) {
+          await this.answerCallbackQuery(id, { text: 'Este asistente es de otro usuario.', show_alert: false });
+          return;
+        }
+        await this.answerCallbackQuery(id);
+        const draft = await this.getDraft(userId);
+        if (!draft || draft.step !== 'awaiting_provinces') return;
+
+        if (action === 'done' || action === 'skip') {
+          const provinces = action === 'skip' ? [] : (draft.provinces || []);
+          await this.setDraft(userId, { provinces, step: 'awaiting_obs' });
+          await this.sendMessage(chatId, 'Observaciones adicionales (opcional). Escribe "-" para omitir.', { reply_markup: kbBackCancel() });
+          return;
+        }
+        if (action === 't') {
+          const name = CUBA_PROVINCES[Number(parts[2])];
+          if (!name) return;
+          const cur = draft.provinces || [];
+          const next = cur.includes(name) ? cur.filter(p => p !== name) : [...cur, name];
+          await this.setDraft(userId, { provinces: next });
+          if (msg?.message_id) await this.editMessageReplyMarkup(chatId, msg.message_id, kbProvinces(next, userId));
+        }
+        return;
+      }
 
       // Moderation buttons (solo admins)
       if (data.startsWith('mod:')) {
@@ -673,7 +779,7 @@ export class SimpleTelegramBot {
             await this.sendMessage(chatId, 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"', { reply_markup: kbBackCancel() });
             break;
           case 'awaiting_provinces':
-            await this.sendMessage(chatId, 'Provincias separadas por coma o "-" para omitir.', { reply_markup: kbBackCancel() });
+            await this.sendMessage(chatId, '📍 ¿En qué provincias lo probaste? Toca para marcar/desmarcar y pulsa "✔️ Listo".', { reply_markup: kbProvinces(draft.provinces || [], userId) });
             break;
           case 'awaiting_obs':
             await this.sendMessage(chatId, 'Observaciones (opcional). Escribe "-" para omitir.', { reply_markup: kbBackCancel() });
@@ -894,6 +1000,27 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
     }
   }
 
+  async sendBandsGuide(chatId) {
+    const guide = `📡 **Guía de bandas en Cuba (ETECSA)**
+
+📶 **Redes disponibles:**
+• 2G (GSM): 900 MHz — llamadas y SMS, casi cualquier teléfono.
+• 3G (UMTS): 900/2100 MHz.
+• 4G (LTE): **Banda 3 (B3, 1800 MHz)** — la principal en todo el país. En algunas zonas también hay Banda 7 (B7, 2600 MHz).
+
+✅ **Lo clave:** para tener 4G en Cuba, tu teléfono debe soportar **LTE B3 (1800)**.
+
+🔍 **¿Cómo saber las bandas de tu teléfono?**
+1. Mira el modelo exacto en Ajustes → Acerca del teléfono.
+2. Búscalo en gsmarena.com o kimovil.com → sección "Red/Network".
+3. Verifica que aparezca LTE B3 (1800). Si además trae B7, mejor.
+
+⚠️ **Cuidado con teléfonos de operadoras de EE.UU.** (Cricket, Boost, Metro...): muchos vienen bloqueados de fábrica o sin B3 → revisa antes de comprar.
+
+💡 Usa /revisar <modelo> para ver la experiencia real de la comunidad con ese modelo, y /subir para aportar la tuya.`;
+    await this.sendMessage(chatId, guide);
+  }
+
   async sendHelp(chatId) {
     const helpMessage = `❓ **Ayuda - CubaModel Bot**
 
@@ -901,8 +1028,10 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
 • /start - Mensaje de bienvenida
 • /subir - Agregar teléfono
 • /revisar <modelo> - Buscar teléfonos
+• /bandas - Guía de bandas 4G en Cuba
 • /reglas - Ver reglas completas
 • /exportar - Exportar base de datos
+• /suscribir - Recibir avisos de novedades
 • /id - Ver información de IDs
 • /reportar - Reportar problema
 

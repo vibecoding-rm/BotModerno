@@ -75,10 +75,12 @@ export default {
         { command: 'start', description: 'Bienvenida y menú principal' },
         { command: 'revisar', description: 'Buscar un teléfono' },
         { command: 'subir', description: 'Proponer un teléfono' },
+        { command: 'bandas', description: 'Guía de bandas 4G en Cuba' },
         { command: 'reglas', description: 'Ver las reglas' },
         { command: 'exportar', description: 'Descargar la base de datos' },
         { command: 'reportar', description: 'Reportar un error en los datos' },
         { command: 'suscribir', description: 'Recibir avisos de novedades' },
+        { command: 'ayuda', description: 'Cómo usar el bot' },
         { command: 'id', description: 'Ver tu ID de Telegram' }
       ];
       const setCommands = await tg('setMyCommands', { commands: publicCommands });
