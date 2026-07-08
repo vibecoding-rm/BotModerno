@@ -8,8 +8,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 NODE_ENV = "production"
 BOT_VERSION = "2.3.0"
-# Grupo autorizado: "Check de Bandas" (el bot ignora cualquier otro grupo)
-ALLOWED_CHAT_IDS = "-1003049823623"
+# Grupos autorizados: "Check de Bandas" (producción) + "Lab de Pruebas CubaModel" (tests)
+ALLOWED_CHAT_IDS = "-1003049823623,-1003904705772"
 # En privado el bot solo responde a estos IDs (dueño/admins)
 ADMIN_TG_IDS = "778282548"
 
