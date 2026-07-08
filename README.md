@@ -1,7 +1,5 @@
 # CubaModel Bot - Cloudflare Workers + D1
 
-[![Deploy: Cloudflare Workers](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml)
-
 Bot de Telegram para consultar y aportar compatibilidad de teléfonos con las redes de Cuba (ETECSA). Corre 100% en Cloudflare Workers (sin Telegraf ni dependencias pesadas) con base de datos D1 y KV para el estado del captcha.
 
 > El antiguo panel web Next.js (`web-panel/`) y sus Pages Functions (`functions/`) dependían de Supabase, que dejó de existir; se eliminaron del repo en julio de 2026. La administración se hace por Telegram (`/pendientes`).
