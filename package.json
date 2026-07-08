@@ -1,14 +1,12 @@
 {
   "name": "cubamodel-bot",
   "version": "2.2.0",
-  "description": "Telegram bot with web panel for CubaModel - Cloudflare Workers deployment",
+  "description": "Telegram bot for CubaModel - Cloudflare Workers + D1",
   "main": "src/worker.js",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "dev:panel": "cd web-panel && npm run dev",
-    "build:panel": "cd web-panel && npm run build",
     "start": "wrangler dev",
     "test": "jest",
     "test:e2e": "playwright test",

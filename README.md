@@ -1,121 +1,73 @@
-# Deploy actualizado: Septiembre 2025
-# CubaModel Bot - Cloudflare Workers + Supabase (edge)
+# CubaModel Bot - Cloudflare Workers + D1
 
 [![Deploy: Cloudflare Workers](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/cloudflare-deploy.yml)
-<!-- Cloudflare Pages disabled
-[![Deploy: Cloudflare Pages](https://github.com/devmaikelrm/BotModerno/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/deploy.yml)
--->
-[![Deploy: Vercel Hook](https://github.com/devmaikelrm/BotModerno/actions/workflows/vercel-deploy.yml/badge.svg?branch=main)](https://github.com/devmaikelrm/BotModerno/actions/workflows/vercel-deploy.yml)
 
-Este repo unifica el bot de Telegram para Cloudflare Workers con integración a Supabase, sin dependencias Node en el runtime del Worker (sin Telegraf). El panel web (Next.js) puede mantenerse aparte, pero el bot funciona 100% en Workers vía webhook.
+Bot de Telegram para consultar y aportar compatibilidad de teléfonos con las redes de Cuba (ETECSA). Corre 100% en Cloudflare Workers (sin Telegraf ni dependencias pesadas) con base de datos D1 y KV para el estado del captcha.
+
+> El antiguo panel web Next.js (`web-panel/`) y sus Pages Functions (`functions/`) dependían de Supabase, que dejó de existir; se eliminaron del repo en julio de 2026. La administración se hace por Telegram (`/pendientes`).
 
 ## Instalación y desarrollo
 
-1. Clona el repo y instala dependencias:
-   ```
-   npm install
-   ```
-
-2. Configura ESLint:
-   ```
-   npm run lint
-   npm run lint:fix
-   ```
-
-3. Para desarrollo local:
-   ```
-   npm run dev
-   ```
+```
+npm install
+npm run dev      # wrangler dev
+npm run lint
+```
 
 ## Estructura
-- src/worker.js - Entrada única del Worker (fetch handler)
-- src/bot-simple.js - Lógica del bot (Telegram API via fetch + Supabase)
+- src/worker.js - Entrada del Worker (fetch handler, cron, endpoints admin)
+- src/bot-simple.js - Lógica del bot (Telegram API vía fetch + D1)
 - src/validation.js - Validación de payloads con Zod
 - src/logger.js - Logging estructurado
-- .eslintrc.js - Configuración de ESLint
-- wrangler.toml - Config del Worker
-- sql/ - Scripts SQL para Supabase
+- wrangler.toml - Config del Worker (bindings DB/APP_KV, cron, vars)
+- sql/schema_d1.sql - Esquema vigente de D1 (`init.sql` y `phones.sql` son legado Supabase)
+- backup/ - Respaldo local de la migración Supabase → D1
 
-## Requisitos de tablas (Supabase)
-- phones(id, commercial_name, model, works, bands, provinces, observations, created_at)
+## Tablas (D1)
+- phones(id, commercial_name, model, works, bands, provinces, observations, status, nombre_comercial, created_at)
 - submission_drafts(tg_id, step, commercial_name, model, works, bands, provinces, observations, updated_at)
 - reports(id, tg_id, chat_id, model, reason, created_at)
 - subscriptions(tg_id, created_at)
 
-Índices recomendados: index en phones(model). Guardar model en UPPERCASE.
+`nombre_comercial` se normaliza en JS (minúsculas, sin acentos) para búsqueda; `bands`/`provinces` se guardan como JSON array en texto.
 
 ## Variables y secretos (Cloudflare)
-Configúralos como secretos en Workers (nunca en código):
-- BOT_TOKEN (Telegram)
-- SUPABASE_URL
-- SUPABASE_SERVICE_ROLE_KEY (solo Worker)
-- TG_WEBHOOK_SECRET (cadena aleatoria larga)
-- ADMIN_TG_IDS (csv)
-- ALLOWED_CHAT_IDS (csv opcional)
+Bindings en wrangler.toml: `DB` (D1 `cubamodel`), `APP_KV` (KV), vars `ALLOWED_CHAT_IDS`, `ADMIN_TG_IDS`.
 
-Comandos para configurar secretos:
+Secretos (nunca en código):
 ```
 wrangler secret put BOT_TOKEN
-wrangler secret put SUPABASE_URL
-wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 wrangler secret put TG_WEBHOOK_SECRET
-wrangler secret put ADMIN_TG_IDS
-wrangler secret put ALLOWED_CHAT_IDS
 ```
 
-## Seguridad y mejores prácticas
-- ✓ Secretos en Wrangler, no en código
-- ✓ Validación de payloads con Zod
-- ✓ Logging estructurado sin datos sensibles
-- ✓ RLS en Supabase con políticas service_role
-- ✓ Respuesta inmediata al webhook (<1s)
-- ✓ Manejo de idempotencia por update_id
-- ✓ Bundle pequeño (sin dependencias pesadas)
-- ✓ En producción no aceptar POST en `/` (usar `/webhook/<TG_WEBHOOK_SECRET>` y el header de Telegram). Para pruebas locales puedes habilitar `ALLOW_ROOT_WEBHOOK="true"`.
-
-## Deploy (Worker del bot)
-- Revisar wrangler.toml (name, main, compatibility_date)
-- Publicar:
+## Deploy
 ```
 npm run deploy
 ```
-
-## Deploy del Panel (Cloudflare Pages)
-- Directorio: web-panel/
-- Build command: npm ci && npm run build
-- Build output: dist
-- Functions: activar Pages Functions y mapear la carpeta functions/ (en el root del repo)
-- Variables de entorno (Frontend): VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
-- Variables de entorno (Functions): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-- En Supabase Auth, agregar redirect: https://<tu-pages>.pages.dev/auth/callback
-
-## Configurar el webhook de Telegram
-Suponiendo tu worker quede en: https://<tu-subdominio>.workers.dev
-- Endpoint final del webhook:
+Luego registrar webhook y comandos:
 ```
-https://<tu-subdominio>.workers.dev/webhook/<TG_WEBHOOK_SECRET>
-```
-- Llamada para setear webhook:
-```
-https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<tu-subdominio>.workers.dev/webhook/<TG_WEBHOOK_SECRET>
+GET https://<tu-worker>.workers.dev/setup-webhook/<TG_WEBHOOK_SECRET>
 ```
 
 ## Rutas del Worker
 - GET / -> "OK CubaModel Bot Worker"
 - POST /webhook/<TG_WEBHOOK_SECRET> -> procesa updates de Telegram (siempre responde 200)
+- GET /setup-webhook/<TG_WEBHOOK_SECRET> -> registra webhook + setMyCommands
+- GET /chat-info/<TG_WEBHOOK_SECRET> -> info de chats conocidos
 - Cualquier otra -> 404
 
 ## Uso del bot
-- /start - mensaje de bienvenida y ayuda
-- /subir (DM) - inicia asistente por pasos con inline keyboard
-- /revisar (grupo) - búsqueda por modelo (case/acentos insensible)
-- /cancelar - cancela asistente
-- /reportar - reporte simple
-- /suscribir /cancelarsub - alta/baja en subscriptions
+- /start - bienvenida y menú
+- /revisar <modelo> - búsqueda por modelo (case/acentos insensible, paginada)
+- /subir - asistente por pasos para proponer un teléfono (en el grupo)
+- /bandas - guía de bandas 4G en Cuba
+- /reglas /fijar - reglas del grupo
+- /exportar - descarga CSV/JSON
+- /reportar - reportar un error en los datos
+- /suscribir /cancelarsub - avisos de novedades
+- /ayuda - ayuda general
+- /pendientes - (admin) moderar propuestas con botones Aprobar/Rechazar
 
 Notas:
-- En DM, /subir nunca muestra el cartel de /revisar.
-- Guardado de model en UPPERCASE.
-- Si no hay resultados en /revisar: sugiere usar /subir.
-- Filtrado de grupos por ALLOWED_CHAT_IDS si se configuró.
-
+- El bot solo opera en el grupo autorizado (ALLOWED_CHAT_IDS); en privado solo responde a los admins (ADMIN_TG_IDS).
+- Si no hay resultados en /revisar, sugiere usar /subir.

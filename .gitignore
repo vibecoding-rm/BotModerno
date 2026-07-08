@@ -128,10 +128,9 @@ temp/
 .vscode/
 .idea/
 *.swp
-*.swoweb-panel/.env.local
+*.swo
 
 # Local backups and build artifacts
 backup/
 dist-check/
 .agents/
-web-panel/.env.local

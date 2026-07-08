@@ -17,12 +17,10 @@
     "types": ["@cloudflare/workers-types"]
   },
   "include": [
-    "src/**/*",
-    "functions/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",
-    "web-panel",
     "web",
     "tests"
   ]
