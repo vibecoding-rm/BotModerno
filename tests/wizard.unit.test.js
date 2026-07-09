@@ -1,7 +1,8 @@
 // tests/wizard.unit.test.js — unit tests de los helpers puros del bot
 import {
   normalizeText, toUpperModel, parseYesNo, splitNormList,
-  parseProvincesText, parseJsonArray, kbProvinces, CUBA_PROVINCES
+  parseProvincesText, parseJsonArray, kbProvinces, CUBA_PROVINCES,
+  escapeHtml, formatSearchResults
 } from '../src/bot-simple.js';
 
 describe('normalizeText', () => {
@@ -76,6 +77,41 @@ describe('parseJsonArray', () => {
   });
   test('array pasa tal cual', () => {
     expect(parseJsonArray(['x'])).toEqual(['x']);
+  });
+});
+
+describe('escapeHtml', () => {
+  test('escapa &, < y >', () => {
+    expect(escapeHtml('a<b> & c')).toBe('a&lt;b&gt; &amp; c');
+  });
+  test('tolera null/undefined y números', () => {
+    expect(escapeHtml(null)).toBe('');
+    expect(escapeHtml(undefined)).toBe('');
+    expect(escapeHtml(42)).toBe('42');
+  });
+  test('deja pasar guiones bajos y asteriscos (ya no son especiales en HTML)', () => {
+    expect(escapeHtml('BV4900_Pro *new*')).toBe('BV4900_Pro *new*');
+  });
+});
+
+describe('formatSearchResults', () => {
+  const row = (over = {}) => ({
+    commercial_name: 'Redmi Note 12', model: '2209116AG', works: true,
+    bands: ['B3'], provinces: ['La Habana'], observations: null, ...over
+  });
+  test('escapa datos de usuario en HTML', () => {
+    const out = formatSearchResults('a<b', [row({ commercial_name: 'X<script>' })], 0, 1);
+    expect(out).toContain('a&lt;b');
+    expect(out).toContain('X&lt;script&gt;');
+    expect(out).not.toContain('<script>');
+  });
+  test('omite el modelo cuando es idéntico al nombre', () => {
+    const out = formatSearchResults('q', [row({ commercial_name: '2209116AG' })], 0, 1);
+    expect(out).not.toContain('(2209116AG)');
+  });
+  test('agrega ❓ a la leyenda solo si hay filas sin confirmar', () => {
+    expect(formatSearchResults('q', [row()], 0, 1)).not.toContain('❓');
+    expect(formatSearchResults('q', [row({ works: null })], 0, 1)).toContain('❓ sin confirmar');
   });
 });
 

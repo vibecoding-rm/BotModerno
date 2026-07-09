@@ -9,8 +9,11 @@
 
 ## Interface Contracts
 ### Bot ↔ D1
-- Read/write tables: `phones`, `submission_drafts`, `reports`, `subscriptions`, `bot_config`.
+- Read/write tables: `phones`, `submission_drafts`, `reports`, `subscriptions`, `bot_config`, `pending_notifications`, `events`.
 - Column names: `works` (0/1), `status` (para filtrar aprobados), `nombre_comercial` (normalizado en JS: minúsculas sin acentos), `bands`/`provinces` (JSON array como texto).
+- `bot_config` se lee en runtime: `captcha_enabled`, `captcha_timeout` (segundos), `auto_approve_join`, `rules`, `welcome`.
+- Mensajes salientes: `parse_mode` HTML por defecto (datos de usuario pasan por `escapeHtml`); `'plain'` para textos de `bot_config`.
+- Avisos a suscriptores: se encolan en `pending_notifications` y el cron (cada 5 min) envía lotes de 30 para respetar los 50 subrequests/request del plan gratis.
 
 ## Code Layout
 - `src/`: Cloudflare Worker source code

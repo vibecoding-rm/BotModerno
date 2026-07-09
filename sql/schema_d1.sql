@@ -72,11 +72,11 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Table: user_roles
-CREATE TABLE IF NOT EXISTS user_roles (
+-- Table: pending_notifications (cola de avisos a suscriptores; el cron la drena por lotes)
+CREATE TABLE IF NOT EXISTS pending_notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id TEXT NOT NULL,
-  role TEXT NOT NULL,
+  tg_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -87,9 +87,9 @@ CREATE TABLE IF NOT EXISTS bot_config (
   welcome TEXT DEFAULT '',
   is_active BOOLEAN DEFAULT 1,
   short_welcome BOOLEAN DEFAULT 1,
-  captcha_enabled BOOLEAN DEFAULT 0,
+  captcha_enabled BOOLEAN DEFAULT 1,
   captcha_timeout INTEGER DEFAULT 120,
-  auto_approve_join BOOLEAN DEFAULT 0,
+  auto_approve_join BOOLEAN DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -106,7 +106,6 @@ CREATE INDEX IF NOT EXISTS idx_phones_status ON phones (status);
 CREATE INDEX IF NOT EXISTS idx_phones_model ON phones (model);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at);
 CREATE INDEX IF NOT EXISTS idx_events_tg_id ON events (tg_id);
-CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles (user_id);
 
 -- Default configuration
 INSERT OR IGNORE INTO bot_config (id, rules, welcome)

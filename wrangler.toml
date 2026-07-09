@@ -29,7 +29,7 @@ database_id = "f8cf0093-1f67-465b-b9bd-1a46029f6e9c"
 binding = "APP_KV"
 id = "629cf5cf681b4f01898c7c8987156840"
 
-# Cron: kick users with expired captcha
+# Cron: expulsa captchas expirados y drena pending_notifications por lotes
 [triggers]
 crons = ["*/5 * * * *"]
 

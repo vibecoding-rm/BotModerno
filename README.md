@@ -26,6 +26,11 @@ npm run lint
 - submission_drafts(tg_id, step, commercial_name, model, works, bands, provinces, observations, updated_at)
 - reports(id, tg_id, chat_id, model, reason, created_at)
 - subscriptions(tg_id, created_at)
+- pending_notifications(id, tg_id, payload, created_at) — cola de avisos; el cron la envía por lotes de 30
+- bot_config(rules, welcome, captcha_enabled, captcha_timeout, auto_approve_join, ...) — el bot la lee en runtime
+- events(id, tg_id, type, payload, created_at) — telemetría
+
+Cambios de esquema: `migrations/` con `wrangler d1 migrations apply cubamodel --remote` (`sql/schema_d1.sql` es el esquema completo para instalaciones nuevas).
 
 `nombre_comercial` se normaliza en JS (minúsculas, sin acentos) para búsqueda; `bands`/`provinces` se guardan como JSON array en texto.
 

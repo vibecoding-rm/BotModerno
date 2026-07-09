@@ -163,19 +163,11 @@ export default {
       return new Response('Bad Request', { status: 400 });
     }
 
-    // TODO: aquí estaba tu lógica actual del bot…
-
-    // Ejemplo de manejo de inserción con “fingerprint” única:
+    // Siempre respondemos 200 para que Telegram no reintente el update
     try {
-      await handleUpdate(update, env); // tu función existente
+      await handleUpdate(update, env);
       return new Response('OK', { status: 200 });
     } catch (e) {
-      // Si el insert rompió unique constraint (duplicado), respondemos 200 para que Telegram no reintente
-      if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
-        // log in background; don't block response
-        ctx.waitUntil(logEvent(env, 'duplicate', { reason: 'fingerprint', update_id: update?.update_id }));
-        return new Response('OK', { status: 200 });
-      }
       ctx.waitUntil(logEvent(env, 'error', { where: 'handleUpdate', error: String(e) }));
       return new Response('OK', { status: 200 });
     }
@@ -183,5 +175,6 @@ export default {
   async scheduled(event, env, ctx) {
     const bot = new SimpleTelegramBot(env);
     ctx.waitUntil(bot.kickExpiredCaptchas());
+    ctx.waitUntil(bot.drainPendingNotifications());
   }
 }

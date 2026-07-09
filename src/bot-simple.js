@@ -152,10 +152,40 @@ function parseJsonArray(v) {
   return Array.isArray(v) ? v : [];
 }
 
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Página de resultados de /revisar: compacto, nombre en negrita, solo campos con datos (HTML)
+function formatSearchResults(query, matches, offset, total) {
+  const from = offset + 1;
+  const to = offset + matches.length;
+  const blocks = matches.map(r => {
+    const w = r.works === true ? '✅' : (r.works === false ? '❌' : '❓');
+    // Omitir el modelo cuando es idéntico al nombre (filas cuyo nombre ES el código)
+    const showModel = r.model && r.model.toUpperCase() !== (r.commercial_name || '').trim().toUpperCase();
+    let head = `${w} <b>${escapeHtml(r.commercial_name)}</b>`;
+    if (showModel) head += ` (${escapeHtml(r.model)})`;
+    const meta = [];
+    if (r.bands.length) meta.push(`📶 ${escapeHtml(r.bands.join(', '))}`);
+    if (r.provinces.length) meta.push(`📍 ${escapeHtml(r.provinces.join(', '))}`);
+    const lines = [head];
+    if (meta.length) lines.push(`    ${meta.join(' · ')}`);
+    if (r.observations) lines.push(`    💬 ${escapeHtml(r.observations)}`);
+    return lines.join('\n');
+  });
+  let legend = '✅ funciona en Cuba · ❌ no funciona';
+  if (matches.some(r => r.works !== true && r.works !== false)) legend += ' · ❓ sin confirmar';
+  return `🔎 Resultados para «${escapeHtml(query)}» · ${from}–${to} de ${total}\n\n` +
+    blocks.join('\n\n') +
+    `\n\n──────────────\n${legend}`;
+}
+
 // Exportados para tests unitarios
 export {
   normalizeText, toUpperModel, parseYesNo, splitNormList,
-  parseProvincesText, parseJsonArray, kbProvinces, CUBA_PROVINCES
+  parseProvincesText, parseJsonArray, kbProvinces, CUBA_PROVINCES,
+  escapeHtml, formatSearchResults
 };
 
 export class SimpleTelegramBot {
@@ -172,14 +202,17 @@ export class SimpleTelegramBot {
   }
 
   // Telegram API helpers
+  // parse_mode: HTML por defecto (los textos propios usan <b>/<i> y los datos de
+  // usuario pasan por escapeHtml); 'plain' omite parse_mode (textos de bot_config).
   async sendMessage(chat_id, text, opts = {}) {
-    return tgFetch(this.token, 'sendMessage', {
+    const payload = {
       chat_id,
       text,
-      parse_mode: opts.parse_mode || 'Markdown',
       reply_markup: opts.reply_markup,
       reply_to_message_id: opts.reply_to_message_id
-    });
+    };
+    if (opts.parse_mode !== 'plain') payload.parse_mode = opts.parse_mode || 'HTML';
+    return tgFetch(this.token, 'sendMessage', payload);
   }
   async sendChatAction(chat_id, action) {
     return tgFetch(this.token, 'sendChatAction', { chat_id, action });
@@ -191,16 +224,31 @@ export class SimpleTelegramBot {
     return tgFetch(this.token, 'answerCallbackQuery', { callback_query_id, ...opts });
   }
   async editMessageText(chat_id, message_id, text, opts = {}) {
-    return tgFetch(this.token, 'editMessageText', {
-      chat_id,
-      message_id,
-      text,
-      parse_mode: opts.parse_mode || 'Markdown',
-      reply_markup: opts.reply_markup
-    });
+    const payload = { chat_id, message_id, text, reply_markup: opts.reply_markup };
+    if (opts.parse_mode !== 'plain') payload.parse_mode = opts.parse_mode || 'HTML';
+    return tgFetch(this.token, 'editMessageText', payload);
   }
   async editMessageReplyMarkup(chat_id, message_id, reply_markup) {
     return tgFetch(this.token, 'editMessageReplyMarkup', { chat_id, message_id, reply_markup });
+  }
+
+  // Config de bot_config (una sola fila), cacheada por instancia (una por update)
+  async getBotConfig() {
+    if (this._config) return this._config;
+    let row = null;
+    try {
+      row = await this.db.prepare("SELECT * FROM bot_config LIMIT 1").first();
+    } catch (e) {
+      logger.error('getBotConfig error', e);
+    }
+    this._config = {
+      rules: row?.rules || '',
+      welcome: row?.welcome || '',
+      captcha_enabled: row ? (row.captcha_enabled === 1 || row.captcha_enabled === true) : true,
+      captcha_timeout: Number(row?.captcha_timeout) || 120,
+      auto_approve_join: row ? (row.auto_approve_join === 1 || row.auto_approve_join === true) : true
+    };
+    return this._config;
   }
 
   // Webhook dispatcher
@@ -214,11 +262,8 @@ export class SimpleTelegramBot {
         await this.onChatJoinRequest(update.chat_join_request);
       }
     } catch (e) {
-      if (String(e).includes('duplicate key value') || String(e).includes('unique constraint')) {
-        throw e;
-      } else {
-        logger.error('handleUpdate error', e);
-      }
+      // Los duplicados ya se manejan en submitPhone; aquí solo queda loguear
+      logger.error('handleUpdate error', e);
     }
   }
 
@@ -256,7 +301,7 @@ export class SimpleTelegramBot {
       if (pending) {
         if (msg.message_id) await this.deleteMessage(chatId, msg.message_id);
         // remind silently
-        await this.sendMessage(chatId, `⏳ @${msg.from?.username || userId} verifica en tu DM para participar.`, {});
+        await this.sendMessage(chatId, `⏳ @${escapeHtml(msg.from?.username || String(userId))} verifica para poder participar.`, {});
         return;
       }
     }
@@ -289,20 +334,20 @@ export class SimpleTelegramBot {
         const user = msg.from;
         const chat = msg.chat;
         
-        let response = '🆔 **Información de IDs**\n\n';
-        response += `👤 **Usuario:**\n`;
-        response += `• ID: \`${userId}\`\n`;
-        response += `• Nombre: ${user.first_name || 'N/A'}\n`;
-        response += `• Username: @${user.username || 'N/A'}\n`;
-        response += `• Apellido: ${user.last_name || 'N/A'}\n\n`;
-        
-        response += `💬 **Chat:**\n`;
-        response += `• ID: \`${chatId}\`\n`;
+        let response = '🆔 <b>Información de IDs</b>\n\n';
+        response += `👤 <b>Usuario:</b>\n`;
+        response += `• ID: <code>${userId}</code>\n`;
+        response += `• Nombre: ${escapeHtml(user.first_name || 'N/A')}\n`;
+        response += `• Username: @${escapeHtml(user.username || 'N/A')}\n`;
+        response += `• Apellido: ${escapeHtml(user.last_name || 'N/A')}\n\n`;
+
+        response += `💬 <b>Chat:</b>\n`;
+        response += `• ID: <code>${chatId}</code>\n`;
         response += `• Tipo: ${chatType}\n`;
-        response += `• Título: ${chat.title || 'N/A'}\n`;
-        
+        response += `• Título: ${escapeHtml(chat.title || 'N/A')}\n`;
+
         if (isAdmin) {
-          response += `\n🔧 **Info de Admin:**\n`;
+          response += `\n🔧 <b>Info de Admin:</b>\n`;
           response += `• Es admin: ✅ Sí\n`;
           response += `• Timestamp: ${new Date().toISOString()}\n`;
         }
@@ -341,7 +386,7 @@ export class SimpleTelegramBot {
       }
       case '/revisar': {
         if (!argStr) {
-          await this.sendMessage(chatId, '📝 Formato: /revisar <modelo>\n\nEjemplo: /revisar Samsung A14');
+          await this.sendMessage(chatId, '📝 Formato: /revisar &lt;modelo&gt;\n\nEjemplo: /revisar Samsung A14');
           return;
         }
         await this.searchByModel(chatId, argStr);
@@ -417,19 +462,7 @@ export class SimpleTelegramBot {
         works: r.works === 1 || r.works === true ? true : (r.works === 0 || r.works === false ? false : null)
       }));
 
-      const lines = matches.map(r => {
-        const w = r.works === true ? '✅' : (r.works === false ? '❌' : '❓');
-        const bands = r.bands.length ? r.bands.join(', ') : '—';
-        const provs = r.provinces.length ? r.provinces.join(', ') : '—';
-        const obs = r.observations ? ` | Obs: ${r.observations}` : '';
-        // Omitir el modelo cuando es idéntico al nombre (filas cuyo nombre ES el código)
-        const showModel = r.model && r.model.toUpperCase() !== (r.commercial_name || '').trim().toUpperCase();
-        return `• ${r.commercial_name}${showModel ? ` (${r.model})` : ''} ${w}\n  Bandas: ${bands}\n  Prov: ${provs}${obs}`;
-      });
-
-      const from = offset + 1;
-      const to = offset + matches.length;
-      let msgText = `🔎 "${query}" — ${from}-${to} de ${total}\n\n` + lines.join('\n\n');
+      const msgText = formatSearchResults(query, matches, offset, total);
 
       // Botones de paginación (callback data máx 64 BYTES: recortar query en UTF-8)
       let qShort = query;
@@ -437,15 +470,16 @@ export class SimpleTelegramBot {
       while (qShort && enc.encode(`pg:${offset + PAGE}:${qShort}`).length > 64) {
         qShort = qShort.slice(0, -1);
       }
+      const to = offset + matches.length;
       const navRow = [];
       if (offset > 0) navRow.push({ text: '◀ Anterior', callback_data: `pg:${Math.max(0, offset - PAGE)}:${qShort}` });
       if (to < total) navRow.push({ text: 'Siguiente ▶', callback_data: `pg:${offset + PAGE}:${qShort}` });
       const kb = navRow.length ? { inline_keyboard: [navRow] } : undefined;
 
       if (editMessageId) {
-        await this.editMessageText(chatId, editMessageId, msgText, { reply_markup: kb });
+        await this.editMessageText(chatId, editMessageId, msgText, { reply_markup: kb, parse_mode: 'HTML' });
       } else {
-        await this.sendMessage(chatId, msgText, { reply_markup: kb });
+        await this.sendMessage(chatId, msgText, { reply_markup: kb, parse_mode: 'HTML' });
       }
     } catch (e) {
       logger.error('searchByModel error', e, { chatId });
@@ -474,21 +508,22 @@ export class SimpleTelegramBot {
   }
   async setDraft(tgId, patch) {
     const existing = await this.getDraft(tgId);
-    
-    const step = patch.hasOwnProperty('step') ? patch.step : (existing ? existing.step : 'awaiting_name');
-    const commercial_name = patch.hasOwnProperty('commercial_name') ? patch.commercial_name : (existing ? existing.commercial_name : null);
-    const model = patch.hasOwnProperty('model') ? patch.model : (existing ? existing.model : null);
-    
-    const worksVal = patch.hasOwnProperty('works') ? patch.works : (existing ? existing.works : null);
+    const has = (k) => Object.prototype.hasOwnProperty.call(patch, k);
+
+    const step = has('step') ? patch.step : (existing ? existing.step : 'awaiting_name');
+    const commercial_name = has('commercial_name') ? patch.commercial_name : (existing ? existing.commercial_name : null);
+    const model = has('model') ? patch.model : (existing ? existing.model : null);
+
+    const worksVal = has('works') ? patch.works : (existing ? existing.works : null);
     const works = worksVal === true ? 1 : (worksVal === false ? 0 : null);
-    
-    const bandsVal = patch.hasOwnProperty('bands') ? patch.bands : (existing ? existing.bands : null);
+
+    const bandsVal = has('bands') ? patch.bands : (existing ? existing.bands : null);
     const bands = Array.isArray(bandsVal) ? JSON.stringify(bandsVal) : (typeof bandsVal === 'string' ? bandsVal : null);
-    
-    const provincesVal = patch.hasOwnProperty('provinces') ? patch.provinces : (existing ? existing.provinces : null);
+
+    const provincesVal = has('provinces') ? patch.provinces : (existing ? existing.provinces : null);
     const provinces = Array.isArray(provincesVal) ? JSON.stringify(provincesVal) : (typeof provincesVal === 'string' ? provincesVal : null);
-    
-    const observations = patch.hasOwnProperty('observations') ? patch.observations : (existing ? existing.observations : null);
+
+    const observations = has('observations') ? patch.observations : (existing ? existing.observations : null);
     const updatedAt = new Date().toISOString();
     
     let row;
@@ -594,12 +629,12 @@ export class SimpleTelegramBot {
           const d = await this.getDraft(userId);
           const summary =
             '📌 Resumen:\n' +
-            `Nombre: ${d.commercial_name}\n` +
-            `Modelo: ${d.model}\n` +
+            `Nombre: ${escapeHtml(d.commercial_name)}\n` +
+            `Modelo: ${escapeHtml(d.model)}\n` +
             `¿Funciona?: ${d.works ? 'Sí' : 'No'}\n` +
-            `Bandas: ${(d.bands && d.bands.length) ? d.bands.join(', ') : '—'}\n` +
-            `Provincias: ${(d.provinces && d.provinces.length) ? d.provinces.join(', ') : '—'}\n` +
-            `Obs: ${d.observations || '—'}`;
+            `Bandas: ${escapeHtml((d.bands && d.bands.length) ? d.bands.join(', ') : '—')}\n` +
+            `Provincias: ${escapeHtml((d.provinces && d.provinces.length) ? d.provinces.join(', ') : '—')}\n` +
+            `Obs: ${escapeHtml(d.observations || '—')}`;
           await send(summary + '\n\nConfirma con el botón.', kbConfirm());
           return true;
         }
@@ -726,23 +761,32 @@ export class SimpleTelegramBot {
         return;
       }
 
-      // Captcha buttons
+      // Captcha buttons (en DM o, si los DMs están cerrados, en el propio grupo)
       if (data.startsWith('cap:')) {
-        await this.answerCallbackQuery(id);
         const parts = data.split(':'); // cap:ok|fail:chatId:userId
         const kind = parts[1];
         const cId = Number(parts[2]);
         const uId = Number(parts[3]);
-        if (uId !== userId) return; // ignore others
+        if (uId !== userId) {
+          await this.answerCallbackQuery(id, { text: 'Esta verificación es de otro usuario.' });
+          return;
+        }
+        const inGroup = msg?.chat?.type === 'group' || msg?.chat?.type === 'supergroup';
         if (kind === 'ok') {
           await this.kvDel(`captcha:${cId}:${uId}`);
+          await this.answerCallbackQuery(id, { text: '✅ ¡Verificación completada!' });
+          // Limpiar el mensaje de captcha del grupo si se verificó ahí
+          if (inGroup && msg?.message_id) await this.deleteMessage(chatId, msg.message_id);
+          // El DM puede fallar si el usuario tiene DMs cerrados; se ignora
           await this.sendMessage(userId, '✅ ¡Verificación completada! Ahora puedes participar en el grupo.');
           await this.sendRules(userId, cId, 'private');
         } else {
+          await this.answerCallbackQuery(id);
           // Expulsar usuario del grupo
           await tgFetch(this.token, 'banChatMember', { chat_id: cId, user_id: uId });
           await tgFetch(this.token, 'unbanChatMember', { chat_id: cId, user_id: uId }); // unban inmediato para que pueda volver a intentar
           await this.kvDel(`captcha:${cId}:${uId}`);
+          if (inGroup && msg?.message_id) await this.deleteMessage(chatId, msg.message_id);
           await this.sendMessage(userId, '❌ Has sido expulsado por no completar la verificación. Puedes volver a unirte al grupo.');
         }
         return;
@@ -819,44 +863,39 @@ export class SimpleTelegramBot {
   }
 
   async onChatJoinRequest(req) {
-    // Approve join request instantly (optional) and DM welcome
+    // Approve join request (según config) and DM welcome
     const user = req.from;
     const chat = { id: req.chat?.id, type: req.chat?.type, title: req.chat?.title };
-    // Try to approve (ignore errors silently)
+    const config = await this.getBotConfig();
+    if (!config.auto_approve_join) return; // la solicitud queda para que un admin la apruebe a mano
     await tgFetch(this.token, 'approveChatJoinRequest', { chat_id: chat.id, user_id: user.id });
-    try {
-      await this.welcomeUserDM(user, chat);
-      await this.startCaptcha(user, chat);
-    } catch (err) {
-      logger.warn('Failed to send welcome/captcha via DM', { error: err.message, userId: user.id });
-      const mention = user.username ? `@${user.username}` : (user.first_name || 'usuario');
-      const fallbackMsg = `⚠️ Hola ${mention}, no pude enviarte un mensaje privado de verificación. Por favor, inicia un chat privado conmigo primero para que pueda enviarte el captcha.`;
-      await this.sendMessage(chat.id, fallbackMsg);
-    }
+    await this.welcomeUserDM(user, chat);
+    // startCaptcha ya maneja el fallback al grupo si los DMs están cerrados
+    await this.startCaptcha(user, chat);
   }
 
   async sendWelcomeMessage(chatId, userId, chatType) {
     try {
       // Get welcome message from database
-      const row = await this.db.prepare("SELECT welcome FROM bot_config LIMIT 1").first();
-      let welcomeMessage = row?.welcome;
-      
+      const config = await this.getBotConfig();
+      let welcomeMessage = config.welcome;
+
       if (!welcomeMessage) {
         // Fallback to default welcome message
-        welcomeMessage = `🎉 *¡BIENVENIDO A CUBAMODEL!* 🇨🇺📱
+        welcomeMessage = `🎉 ¡BIENVENIDO A CUBAMODEL! 🇨🇺📱
 
-🌟 *Base de Datos Abierta para Teléfonos en Cuba*
+🌟 Base de Datos Abierta para Teléfonos en Cuba
 
 Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.
 
-✨ Aquí todo es distinto: la información será _SIEMPRE_ abierta y descargable.
+✨ Aquí todo es distinto: la información será SIEMPRE abierta y descargable.
 
-⚠️ *LIMITACIONES ACTUALES:*
+⚠️ LIMITACIONES ACTUALES:
 • Puede ir lento en horas pico
 • Hay topes de consultas
 • Puede fallar (fase desarrollo)
 
-💫 Gracias por sumarte. 
+💫 Gracias por sumarte.
 Esto es de todos y para todos. ✨`;
       }
 
@@ -885,86 +924,35 @@ Esto es de todos y para todos. ✨`;
       };
 
       if (chatType === 'private') {
-        await this.sendMessage(chatId, welcomeMessage, { reply_markup: welcomeKeyboard });
+        // Texto de bot_config (o fallback): sin parse_mode para no romper con caracteres sueltos
+        await this.sendMessage(chatId, welcomeMessage, { reply_markup: welcomeKeyboard, parse_mode: 'plain' });
       } else {
         // En grupo: bienvenida corta en el propio grupo (sin DMs no solicitados)
         await this.sendMessage(chatId, this.getShortRules());
       }
     } catch (error) {
       logger.error('Error fetching welcome message from database', error);
-      // Fallback to default welcome message
-      const defaultWelcome = `🎉 *¡BIENVENIDO A CUBAMODEL!* 🇨🇺📱
-
-🌟 *Base de Datos Abierta para Teléfonos en Cuba*
-
-Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.
-
-✨ Aquí todo es distinto: la información será _SIEMPRE_ abierta y descargable.
-
-💫 Gracias por sumarte. 
-Esto es de todos y para todos. ✨`;
-
-      const defaultRulesAndCommands = `📜 *NUESTRAS REGLAS:*
-1️⃣ Respeto; nada de insultos
-2️⃣ No ventas, solo compatibilidad
-3️⃣ Aporta datos reales con /subir
-4️⃣ Usa /reportar para errores
-5️⃣ La base es de todos
-
-🇨🇺 ¡Vamos a hacer la mejor base de datos 
-de compatibilidad de teléfonos en Cuba! 🇨🇺`;
-      
-      const welcomeKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '📱 Agregar Teléfono', callback_data: 'welcome:add_phone' },
-            { text: '🔍 Buscar Teléfonos', callback_data: 'welcome:search' }
-          ],
-          [
-            { text: '📜 Ver Reglas', callback_data: 'welcome:rules' },
-            { text: '📊 Ver Estadísticas', callback_data: 'welcome:stats' }
-          ],
-          [
-            { text: '📥 Exportar Base', callback_data: 'welcome:export' },
-            { text: '❓ Ayuda', callback_data: 'welcome:help' }
-          ]
-        ]
-      };
-      
-      if (chatType === 'private') {
-        await this.sendMessage(chatId, defaultWelcome, { reply_markup: welcomeKeyboard });
-        await this.sendMessage(chatId, defaultRulesAndCommands);
-      } else {
-        await this.sendMessage(chatId, this.getShortRules());
-      }
+      await this.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo en un momento.');
     }
   }
 
   async sendRules(userId, chatId, chatType) {
-    try {
-      // Get rules from database
-      const row = await this.db.prepare("SELECT rules FROM bot_config LIMIT 1").first();
-      const rules = row?.rules || 
-        '📜 Reglas:\n' +
-        '1) Respeto; nada de insultos ni spam.\n' +
-        '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
-        '3) Aporta datos reales con /subir.\n' +
-        '4) Usa /reportar para avisar de errores.\n' +
-        '5) La base es de todos, nadie puede privatizarla.';
+    const config = await this.getBotConfig();
+    const rules = config.rules ||
+      '📜 Reglas:\n' +
+      '1) Respeto; nada de insultos ni spam.\n' +
+      '2) No ventas, solo compatibilidad de teléfonos en Cuba.\n' +
+      '3) Aporta datos reales con /subir.\n' +
+      '4) Usa /reportar para avisar de errores.\n' +
+      '5) La base es de todos, nadie puede privatizarla.';
 
-      // Reglas directamente en el chat donde se pidieron
-      await this.sendMessage(chatType === 'private' ? userId : chatId, rules);
-    } catch (error) {
-      logger.error('Error fetching rules from database', error);
-      // Fallback to default rules
-      const defaultRules = '📜 Reglas:\n1) Respeto; nada de insultos ni spam.\n2) No ventas, solo compatibilidad de teléfonos en Cuba.\n3) Aporta datos reales con /subir.\n4) Usa /reportar para avisar de errores.\n5) La base es de todos, nadie puede privatizarla.';
-      await this.sendMessage(chatType === 'private' ? userId : chatId, defaultRules);
-    }
+    // Reglas directamente en el chat donde se pidieron; texto de bot_config → sin parse_mode
+    await this.sendMessage(chatType === 'private' ? userId : chatId, rules, { parse_mode: 'plain' });
   }
 
   // Función para generar reglas resumidas para fijar en grupos
   getShortRules() {
-    return `📱 **CubaModel - Reglas Rápidas**
+    return `📱 <b>CubaModel - Reglas Rápidas</b>
 
 1️⃣ Respeto - Sin spam ni insultos
 2️⃣ Solo compatibilidad de teléfonos
@@ -984,17 +972,17 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
       const totalPhones = phonesRow?.n || 0;
       const eventsToday = eventsRow?.n || 0;
 
-      const statsMessage = `📊 **Estadísticas de CubaModel**
+      const statsMessage = `📊 <b>Estadísticas de CubaModel</b>
 
-📱 **Teléfonos en la base:**
+📱 <b>Teléfonos en la base:</b>
 • Total aprobados: ${totalPhones}
 • Última actualización: ${new Date().toLocaleDateString()}
 
-📈 **Actividad:**
+📈 <b>Actividad:</b>
 • Eventos hoy: ${eventsToday}
 • Estado: ✅ Activo
 
-🌐 **Información:**
+🌐 <b>Información:</b>
 • Base de datos: Abierta y gratuita
 • Proyecto: Comunitario
 • Región: Cuba 🇨🇺
@@ -1009,33 +997,33 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
   }
 
   async sendBandsGuide(chatId) {
-    const guide = `📡 **Guía de bandas en Cuba (ETECSA)**
+    const guide = `📡 <b>Guía de bandas en Cuba (ETECSA)</b>
 
-📶 **Redes disponibles:**
+📶 <b>Redes disponibles:</b>
 • 2G (GSM): 900 MHz — llamadas y SMS, casi cualquier teléfono.
 • 3G (UMTS): 900/2100 MHz.
-• 4G (LTE): **Banda 3 (B3, 1800 MHz)** — la principal en todo el país. En algunas zonas también hay Banda 7 (B7, 2600 MHz).
+• 4G (LTE): <b>Banda 3 (B3, 1800 MHz)</b> — la principal en todo el país. En algunas zonas también hay Banda 7 (B7, 2600 MHz).
 
-✅ **Lo clave:** para tener 4G en Cuba, tu teléfono debe soportar **LTE B3 (1800)**.
+✅ <b>Lo clave:</b> para tener 4G en Cuba, tu teléfono debe soportar <b>LTE B3 (1800)</b>.
 
-🔍 **¿Cómo saber las bandas de tu teléfono?**
+🔍 <b>¿Cómo saber las bandas de tu teléfono?</b>
 1. Mira el modelo exacto en Ajustes → Acerca del teléfono.
 2. Búscalo en gsmarena.com o kimovil.com → sección "Red/Network".
 3. Verifica que aparezca LTE B3 (1800). Si además trae B7, mejor.
 
-⚠️ **Cuidado con teléfonos de operadoras de EE.UU.** (Cricket, Boost, Metro...): muchos vienen bloqueados de fábrica o sin B3 → revisa antes de comprar.
+⚠️ <b>Cuidado con teléfonos de operadoras de EE.UU.</b> (Cricket, Boost, Metro...): muchos vienen bloqueados de fábrica o sin B3 → revisa antes de comprar.
 
-💡 Usa /revisar <modelo> para ver la experiencia real de la comunidad con ese modelo, y /subir para aportar la tuya.`;
+💡 Usa /revisar &lt;modelo&gt; para ver la experiencia real de la comunidad con ese modelo, y /subir para aportar la tuya.`;
     await this.sendMessage(chatId, guide);
   }
 
   async sendHelp(chatId) {
-    const helpMessage = `❓ **Ayuda - CubaModel Bot**
+    const helpMessage = `❓ <b>Ayuda - CubaModel Bot</b>
 
-🤖 **Comandos principales:**
+🤖 <b>Comandos principales:</b>
 • /start - Mensaje de bienvenida
 • /subir - Agregar teléfono
-• /revisar <modelo> - Buscar teléfonos
+• /revisar &lt;modelo&gt; - Buscar teléfonos
 • /bandas - Guía de bandas 4G en Cuba
 • /reglas - Ver reglas completas
 • /exportar - Exportar base de datos
@@ -1043,18 +1031,18 @@ de compatibilidad de teléfonos en Cuba! 🇨🇺`;
 • /id - Ver información de IDs
 • /reportar - Reportar problema
 
-📱 **Cómo usar:**
-1. **Agregar teléfono:** Usa /subir en el grupo y sigue los pasos
-2. **Buscar teléfonos:** Usa /revisar Samsung A14
-3. **Ver reglas:** Usa /reglas
-4. **Exportar datos:** Usa /exportar y elige el formato
+📱 <b>Cómo usar:</b>
+1. <b>Agregar teléfono:</b> Usa /subir en el grupo y sigue los pasos
+2. <b>Buscar teléfonos:</b> Usa /revisar Samsung A14
+3. <b>Ver reglas:</b> Usa /reglas
+4. <b>Exportar datos:</b> Usa /exportar y elige el formato
 
-🔧 **Para administradores:**
+🔧 <b>Para administradores:</b>
 • /pendientes - Revisar propuestas pendientes (aprobar/rechazar)
 • /fijar - Mostrar reglas cortas en grupo
 • /id - Ver información detallada
 
-❓ **¿Necesitas más ayuda?**
+❓ <b>¿Necesitas más ayuda?</b>
 Contacta a los administradores del grupo.`;
 
     await this.sendMessage(chatId, helpMessage);
@@ -1077,22 +1065,27 @@ Contacta a los administradores del grupo.`;
       ]
     };
 
-    const exportMessage = `📥 **Exportar Base de Datos**
+    const exportMessage = `📥 <b>Exportar Base de Datos</b>
 
 Selecciona el formato que prefieras para descargar la información:
 
-📄 **CSV** - Para Excel/Google Sheets
-📋 **JSON** - Para desarrolladores
-📊 **Estadísticas** - Solo números y resúmenes
-📱 **Teléfonos** - Solo la lista de teléfonos
+📄 <b>CSV</b> - Para Excel/Google Sheets
+📋 <b>JSON</b> - Para desarrolladores
+📊 <b>Estadísticas</b> - Solo números y resúmenes
+📱 <b>Teléfonos</b> - Solo la lista de teléfonos
 
-💡 *Los archivos se enviarán como documentos*`;
+💡 <i>Los archivos se enviarán como documentos</i>`;
 
     await this.sendMessage(chatId, exportMessage, { reply_markup: exportKeyboard });
   }
 
   async handleExportCallback(chatId, userId, format) {
     try {
+      // Exportar vuelca toda la base: limitar a 2 por minuto por usuario
+      if (await this.rateLimited(`export:${userId}`, 2)) {
+        await this.sendMessage(chatId, '⏳ Máximo 2 exportaciones por minuto. Espera un momento e intenta de nuevo.');
+        return;
+      }
       await this.sendMessage(chatId, '⏳ Generando archivo de exportación...');
 
       let filename, content;
@@ -1284,15 +1277,15 @@ Selecciona el formato que prefieras para descargar la información:
     } catch (error) {
       logger.error('Error sending document:', error);
       // Fallback: enviar como mensaje de texto si falla el documento
-      await this.sendMessage(chatId, `📄 **${filename}**\n\n\`\`\`\n${content.substring(0, 4000)}\n\`\`\``);
+      await this.sendMessage(chatId, `📄 <b>${escapeHtml(filename)}</b>\n\n<pre>${escapeHtml(content.substring(0, 3500))}</pre>`);
     }
   }
 
   async welcomeUserDM(user, chat) {
     try {
       // Get welcome message from database
-      const row = await this.db.prepare("SELECT welcome FROM bot_config LIMIT 1").first();
-      let msg = row?.welcome;
+      const config = await this.getBotConfig();
+      let msg = config.welcome;
       
       if (!msg) {
         // Fallback to default welcome message
@@ -1323,8 +1316,8 @@ Selecciona el formato que prefieras para descargar la información:
           .replace(/{chat_title}/g, chatTitle);
       }
 
-      // Try DM; if user has blocked bot, ignore
-      await this.sendMessage(user.id, msg);
+      // Try DM; if user has blocked bot, ignore. Texto de bot_config → sin parse_mode.
+      await this.sendMessage(user.id, msg, { parse_mode: 'plain' });
     } catch (error) {
       logger.error('Error fetching welcome message from database', error);
       // Fallback to default welcome
@@ -1333,7 +1326,7 @@ Selecciona el formato que prefieras para descargar la información:
         'Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.\n' +
         'Aquí todo es distinto: la información será siempre abierta y descargable.\n\n' +
         'Gracias por sumarte. Esto es de todos y para todos. ✨';
-      await this.sendMessage(user.id, defaultMsg);
+      await this.sendMessage(user.id, defaultMsg, { parse_mode: 'plain' });
     }
   }
 
@@ -1375,6 +1368,16 @@ Selecciona el formato que prefieras para descargar la información:
       return [];
     }
   }
+  // Rate limit simple en KV: máx `limit` usos por ~minuto (KV es eventual; freno grueso, no exacto)
+  async rateLimited(key, limit) {
+    if (!this.kv) return false;
+    const k = `rl:${key}`;
+    const cur = Number(await this.kvGet(k)) || 0;
+    if (cur >= limit) return true;
+    await this.kvSet(k, String(cur + 1), 60);
+    return false;
+  }
+
   async kickExpiredCaptchas() {
     try {
       const keys = await this.kvKeys('captcha:');
@@ -1415,35 +1418,49 @@ Selecciona el formato que prefieras para descargar la información:
     };
   }
   async startCaptchaAndWelcome(user, chat) {
-    await this.startCaptcha(user, chat);
-    // Solo enviar mensaje corto en grupos, no llenar el chat
-    if (this.showShortWelcomeInGroup && (chat.type === 'group' || chat.type === 'supergroup')) {
-      const short = `👋 ¡Hola ${user.first_name || 'usuario'}! Revisa tus DM para verificar y participar.`;
+    const viaDm = await this.startCaptcha(user, chat);
+    // Solo enviar mensaje corto en grupos, no llenar el chat (si el captcha fue por DM)
+    if (viaDm && this.showShortWelcomeInGroup && (chat.type === 'group' || chat.type === 'supergroup')) {
+      const short = `👋 ¡Hola ${escapeHtml(user.first_name || 'usuario')}! Revisa tus DM para verificar y participar.`;
       await this.sendMessage(chat.id, short);
     }
   }
+  // Devuelve true si el captcha se envió por DM, false si fue en el grupo o está desactivado.
   async startCaptcha(user, chat) {
-    // Save expiration timestamp and a long TTL (e.g. 86400)
-    const expiration = Date.now() + 120000;
-    await this.kvSet(`captcha:${chat.id}:${user.id}`, String(expiration), 86400);
-    const dm =
-      '🔐 **Verificación de seguridad**\n\n' +
+    const config = await this.getBotConfig();
+    if (!config.captcha_enabled) return false;
+    const timeoutSec = config.captcha_timeout;
+    const minutes = Math.max(1, Math.round(timeoutSec / 60));
+    const text =
+      '🔐 <b>Verificación de seguridad</b>\n\n' +
       'Antes de participar en el grupo, confirma que eres humano.\n' +
       'Esto nos ayuda a evitar spam y mantener el grupo limpio.\n\n' +
-      '⏰ Tienes 2 minutos para verificar.\n' +
+      `⏰ Tienes ${minutes} minuto${minutes === 1 ? '' : 's'} para verificar.\n` +
       '❌ Si no verificas, serás expulsado automáticamente.';
-    await this.sendMessage(user.id, dm, { reply_markup: this.captchaKeyboard(chat.id, user.id) });
+    // Intentar por DM primero; la key en KV se guarda solo cuando el captcha llegó a alguna parte
+    const dm = await this.sendMessage(user.id, text, { reply_markup: this.captchaKeyboard(chat.id, user.id) });
+    const viaDm = !!dm?.ok;
+    if (!viaDm) {
+      // DMs cerrados: captcha con botón en el propio grupo para no dejar al usuario atrapado
+      const mention = escapeHtml(user.username ? `@${user.username}` : (user.first_name || 'usuario'));
+      await this.sendMessage(chat.id, `🔐 ${mention}, confirma que eres humano para participar:`, {
+        reply_markup: this.captchaKeyboard(chat.id, user.id)
+      });
+    }
+    const expiration = Date.now() + timeoutSec * 1000;
+    await this.kvSet(`captcha:${chat.id}:${user.id}`, String(expiration), 86400);
+    return viaDm;
   }
 
   formatConfirmation(d) {
     return (
       '📱 Resumen:\n\n' +
-      `Nombre: ${d.commercial_name}\n` +
-      `Modelo: ${d.model}\n` +
+      `Nombre: ${escapeHtml(d.commercial_name)}\n` +
+      `Modelo: ${escapeHtml(d.model)}\n` +
       `Funciona en Cuba: ${d.works ? 'Sí' : 'No'}\n` +
-      `Bandas: ${(d.bands && d.bands.length) ? d.bands.join(', ') : '—'}\n` +
-      `Provincias: ${(d.provinces && d.provinces.length) ? d.provinces.join(', ') : '—'}\n` +
-      `Observaciones: ${d.observations || '—'}`
+      `Bandas: ${escapeHtml((d.bands && d.bands.length) ? d.bands.join(', ') : '—')}\n` +
+      `Provincias: ${escapeHtml((d.provinces && d.provinces.length) ? d.provinces.join(', ') : '—')}\n` +
+      `Observaciones: ${escapeHtml(d.observations || '—')}`
     );
   }
 
@@ -1511,12 +1528,12 @@ Selecciona el formato que prefieras para descargar la información:
     const provinces = parseJsonArray(p.provinces);
     const works = p.works === 1 || p.works === true ? '✅ Sí' : '❌ No';
     const txt = `📋 Propuesta #${p.id}` + (pendingCount != null ? ` (${pendingCount} pendientes)` : '') + '\n\n' +
-      `📱 Nombre: ${p.commercial_name}\n` +
-      `🔢 Modelo: ${p.model || '—'}\n` +
+      `📱 Nombre: ${escapeHtml(p.commercial_name)}\n` +
+      `🔢 Modelo: ${escapeHtml(p.model || '—')}\n` +
       `🇨🇺 Funciona: ${works}\n` +
-      `📡 Bandas: ${bands.length ? bands.join(', ') : '—'}\n` +
-      `📍 Provincias: ${provinces.length ? provinces.join(', ') : '—'}\n` +
-      `📝 Obs: ${p.observations || '—'}\n` +
+      `📡 Bandas: ${escapeHtml(bands.length ? bands.join(', ') : '—')}\n` +
+      `📍 Provincias: ${escapeHtml(provinces.length ? provinces.join(', ') : '—')}\n` +
+      `📝 Obs: ${escapeHtml(p.observations || '—')}\n` +
       `📅 Enviado: ${p.created_at || '—'}`;
     return txt;
   }
@@ -1581,24 +1598,41 @@ Selecciona el formato que prefieras para descargar la información:
     await this.sendPendingReview(chatId, id);
   }
 
+  // Encola la notificación (una fila por suscriptor); el cron la envía por lotes.
+  // Enviar en línea rompía el límite de 50 subrequests por request del plan gratis.
   async notifySubscribers(phone) {
     try {
-      const res = await this.db.prepare("SELECT tg_id FROM subscriptions LIMIT 100").all();
-      const subs = res.results || [];
-      if (!subs.length) return;
       const bands = parseJsonArray(phone.bands);
       const works = phone.works === 1 || phone.works === true ? '✅ funciona' : '❌ no funciona';
-      const txt = `📢 Nuevo teléfono en la base:\n\n📱 ${phone.commercial_name}` +
-        (phone.model ? ` (${phone.model})` : '') +
+      const txt = `📢 Nuevo teléfono en la base:\n\n📱 ${escapeHtml(phone.commercial_name)}` +
+        (phone.model ? ` (${escapeHtml(phone.model)})` : '') +
         `\n🇨🇺 ${works} en Cuba` +
-        (bands.length ? `\n📡 Bandas: ${bands.join(', ')}` : '') +
+        (bands.length ? `\n📡 Bandas: ${escapeHtml(bands.join(', '))}` : '') +
         '\n\nUsa /revisar en el grupo para verlo.';
-      for (const s of subs) {
-        // Puede fallar si el usuario nunca inició el bot; se ignora
-        await this.sendMessage(s.tg_id, txt);
-      }
+      await this.db.prepare(
+        "INSERT INTO pending_notifications (tg_id, payload, created_at) SELECT tg_id, ?1, ?2 FROM subscriptions"
+      ).bind(txt, new Date().toISOString()).run();
     } catch (e) {
       logger.error('notifySubscribers error', e);
+    }
+  }
+
+  // Drena la cola de notificaciones en lotes chicos (llamado desde el cron cada 5 min)
+  async drainPendingNotifications(batchSize = 30) {
+    try {
+      const res = await this.db.prepare(
+        "SELECT id, tg_id, payload FROM pending_notifications ORDER BY id LIMIT ?1"
+      ).bind(batchSize).all();
+      const rows = res.results || [];
+      if (!rows.length) return;
+      for (const row of rows) {
+        // Puede fallar si el usuario nunca inició el bot o lo bloqueó; se descarta igual
+        await this.sendMessage(row.tg_id, row.payload);
+      }
+      const ids = rows.map(r => Number(r.id)).filter(Number.isFinite).join(',');
+      await this.db.prepare(`DELETE FROM pending_notifications WHERE id IN (${ids})`).run();
+    } catch (e) {
+      logger.error('drainPendingNotifications error', e);
     }
   }
 
@@ -1621,7 +1655,7 @@ Selecciona el formato que prefieras para descargar la información:
     try {
       const reason = (text || '').trim();
       if (!reason) {
-        await this.sendMessage(chatId, 'Escribe: /reportar <texto del reporte>.');
+        await this.sendMessage(chatId, 'Escribe: /reportar &lt;texto del reporte&gt;.');
         return;
       }
       const createdAt = new Date().toISOString();

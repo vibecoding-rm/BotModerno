@@ -12,6 +12,7 @@ export default [
         Response: 'readonly',
         URL: 'readonly',
         globalThis: 'readonly',
+        TextEncoder: 'readonly',
       },
     },
     rules: {
