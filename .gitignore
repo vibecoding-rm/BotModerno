@@ -140,3 +140,8 @@ CUenta*.txt
 tools/ia-*.py
 *.session
 *.session-journal
+
+# Datos de trabajo de barridos/imports (regenerables)
+tools/*.sql
+tools/*.xlsx
+tools/*.csv

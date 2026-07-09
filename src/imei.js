@@ -77,9 +77,15 @@ export async function handleImei(bot, chatId, argStr) {
         lines.push('📲 ¿Lo probaste en Cuba? Aporta con /subir. Y revisa /bandas (la clave: LTE B3).');
       }
     } else {
-      lines.push(`🤷 El TAC <code>${tac}</code> no está en nuestra base (Osmocom, ~22.500 equipos).`);
+      // Registrar el TAC no encontrado: sirve para curar la base con datos reales de uso
+      try {
+        await bot.db.prepare(
+          "INSERT INTO events (tg_id, type, payload, created_at) VALUES (NULL, 'tac_miss', ?1, ?2)"
+        ).bind(tac, new Date().toISOString()).run();
+      } catch { /* solo telemetría */ }
+      lines.push(`🤷 El TAC <code>${tac}</code> todavía no está en nuestra base.`);
       lines.push('');
-      lines.push('💡 Busca el modelo por nombre con /revisar, o mira /bandas para saber qué debe soportar.');
+      lines.push('📝 Lo anotamos para agregarlo. Mientras, busca el modelo por nombre con /revisar, o mira /bandas para saber qué debe soportar.');
     }
 
     if (luhn === false) {
