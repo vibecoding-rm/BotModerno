@@ -198,8 +198,20 @@ export class SimpleTelegramBot {
       }
     }
 
-    // En privado el bot solo responde al dueño/admins
-    if (chatType === 'private' && !this.isAdmin(userId)) return;
+    // En privado el bot solo atiende al dueño/admins; al resto lo orienta al grupo
+    // (una vez por minuto, para no responder en silencio y parecer roto)
+    if (chatType === 'private' && !this.isAdmin(userId)) {
+      if (!(await this.rateLimited(`dmredir:${userId}`, 1))) {
+        await this.sendMessage(chatId,
+          '👋 Este bot trabaja en el grupo <b>Check de Bandas</b> 🇨🇺.\n\n' +
+          'Allá puedes usar:\n' +
+          '🔎 /revisar — buscar si un teléfono funciona en Cuba\n' +
+          '📲 /subir — aportar tu experiencia\n' +
+          '📡 /bandas — guía 4G\n\n' +
+          '🔔 Si te suscribes con /suscribir en el grupo, por aquí te llegarán los avisos de teléfonos nuevos.');
+      }
+      return;
+    }
 
     // Admin en privado: foto con caption "/banner" -> guardar banner de bienvenida
     if (chatType === 'private' && Array.isArray(msg.photo) && msg.photo.length) {
