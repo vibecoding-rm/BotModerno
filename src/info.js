@@ -199,6 +199,7 @@ export async function sendHelp(bot, chatId) {
 • /start - Mensaje de bienvenida
 • /subir - Agregar teléfono
 • /revisar &lt;modelo&gt; - Buscar teléfonos
+• /imei &lt;número&gt; - Identificar teléfono por IMEI (<code>*#06#</code>)
 • /bandas - Guía de bandas 4G en Cuba
 • /reglas - Ver reglas completas
 • /exportar - Exportar base de datos

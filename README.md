@@ -27,6 +27,7 @@ npm run lint
 - reports(id, tg_id, chat_id, model, reason, created_at)
 - subscriptions(tg_id, created_at)
 - pending_notifications(id, tg_id, payload, created_at) — cola de avisos; el cron la envía por lotes de 30
+- tacs(tac, brand, model, aka) — base TAC de Osmocom para /imei (importada con tools/ia-importa-tacs.py)
 - bot_config(rules, welcome, captcha_enabled, captcha_timeout, auto_approve_join, ...) — el bot la lee en runtime
 - events(id, tg_id, type, payload, created_at) — telemetría
 
@@ -62,6 +63,7 @@ GET https://<tu-worker>.workers.dev/setup-webhook/<TG_WEBHOOK_SECRET>
 ## Uso del bot
 - /start - bienvenida y menú
 - /revisar <modelo> - búsqueda por modelo (case/acentos insensible, paginada; FTS5 con prefijos: "samsun galax" encuentra "Samsung Galaxy…", con fallback a subcadena)
+- /imei <número> - identifica marca/modelo por el TAC del IMEI (tabla `tacs`, Osmocom TAC DB CC BY-SA 3.0, ~22.500 equipos) y lo cruza con la base comunitaria
 - /subir - asistente por pasos para proponer un teléfono (en el grupo)
 - /bandas - guía de bandas 4G en Cuba
 - /reglas /fijar - reglas del grupo

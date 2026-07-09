@@ -74,6 +74,7 @@ export default {
       const publicCommands = [
         { command: 'start', description: 'Bienvenida y menú principal' },
         { command: 'revisar', description: 'Buscar un teléfono' },
+        { command: 'imei', description: 'Identificar teléfono por su IMEI' },
         { command: 'subir', description: 'Proponer un teléfono' },
         { command: 'bandas', description: 'Guía de bandas 4G en Cuba' },
         { command: 'reglas', description: 'Ver las reglas' },

@@ -4,6 +4,7 @@
 import { logger } from './logger.js';
 import { escapeHtml } from './format.js';
 import { searchByModel } from './search.js';
+import { handleImei } from './imei.js';
 import { startWizard, cancelWizard } from './wizard.js';
 import { sendExportOptions } from './export.js';
 import { sendPendingReview } from './moderation.js';
@@ -52,6 +53,10 @@ export async function onCommand(bot, { chatId, chatType, userId, msg, text }) {
         return;
       }
       await searchByModel(bot, chatId, argStr);
+      break;
+    }
+    case '/imei': {
+      await handleImei(bot, chatId, argStr);
       break;
     }
     case '/cancelar': {
