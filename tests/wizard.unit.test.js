@@ -2,7 +2,7 @@
 import {
   normalizeText, toUpperModel, parseYesNo, splitNormList,
   parseProvincesText, parseJsonArray, CUBA_PROVINCES,
-  escapeHtml, formatSearchResults
+  escapeHtml, formatSearchResults, buildFtsQuery
 } from '../src/format.js';
 import { kbProvinces } from '../src/keyboards.js';
 
@@ -78,6 +78,22 @@ describe('parseJsonArray', () => {
   });
   test('array pasa tal cual', () => {
     expect(parseJsonArray(['x'])).toEqual(['x']);
+  });
+});
+
+describe('buildFtsQuery', () => {
+  test('tokeniza con prefijos y AND implícito', () => {
+    expect(buildFtsQuery('samsun galax')).toBe('"samsun"* "galax"*');
+  });
+  test('normaliza acentos/mayúsculas y separa por no-alfanuméricos', () => {
+    expect(buildFtsQuery('SM-A520L Holguín')).toBe('"sm"* "a520l"* "holguin"*');
+  });
+  test('neutraliza comillas y sintaxis FTS del usuario', () => {
+    expect(buildFtsQuery('a"b OR c')).toBe('"a"* "b"* "or"* "c"*');
+  });
+  test('sin tokens utilizables devuelve null', () => {
+    expect(buildFtsQuery('!!! ---')).toBeNull();
+    expect(buildFtsQuery('')).toBeNull();
   });
 });
 

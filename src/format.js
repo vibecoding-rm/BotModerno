@@ -77,6 +77,14 @@ export function parsePhoneRow(r) {
   };
 }
 
+// Query FTS5 con prefijos: "samsun galax" -> '"samsun"* "galax"*' (AND implicito).
+// Devuelve null si no quedan tokens utilizables.
+export function buildFtsQuery(query) {
+  const tokens = normalizeText(query).split(/[^a-z0-9]+/).filter(Boolean);
+  if (!tokens.length) return null;
+  return tokens.map(t => `"${t}"*`).join(' ');
+}
+
 export function escapeHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

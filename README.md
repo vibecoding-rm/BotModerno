@@ -61,7 +61,7 @@ GET https://<tu-worker>.workers.dev/setup-webhook/<TG_WEBHOOK_SECRET>
 
 ## Uso del bot
 - /start - bienvenida y menú
-- /revisar <modelo> - búsqueda por modelo (case/acentos insensible, paginada)
+- /revisar <modelo> - búsqueda por modelo (case/acentos insensible, paginada; FTS5 con prefijos: "samsun galax" encuentra "Samsung Galaxy…", con fallback a subcadena)
 - /subir - asistente por pasos para proponer un teléfono (en el grupo)
 - /bandas - guía de bandas 4G en Cuba
 - /reglas /fijar - reglas del grupo

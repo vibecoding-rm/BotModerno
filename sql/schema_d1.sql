@@ -100,6 +100,31 @@ BEGIN
   UPDATE bot_config SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
+-- Indice FTS5 de busqueda (contenido externo sobre phones, sincronizado por triggers)
+CREATE VIRTUAL TABLE IF NOT EXISTS phones_fts USING fts5(
+  nombre_comercial,
+  model,
+  content='phones',
+  content_rowid='id'
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_phones_fts_ai AFTER INSERT ON phones BEGIN
+  INSERT INTO phones_fts(rowid, nombre_comercial, model)
+  VALUES (new.id, IFNULL(new.nombre_comercial, ''), IFNULL(new.model, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_phones_fts_ad AFTER DELETE ON phones BEGIN
+  INSERT INTO phones_fts(phones_fts, rowid, nombre_comercial, model)
+  VALUES ('delete', old.id, IFNULL(old.nombre_comercial, ''), IFNULL(old.model, ''));
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_phones_fts_au AFTER UPDATE ON phones BEGIN
+  INSERT INTO phones_fts(phones_fts, rowid, nombre_comercial, model)
+  VALUES ('delete', old.id, IFNULL(old.nombre_comercial, ''), IFNULL(old.model, ''));
+  INSERT INTO phones_fts(rowid, nombre_comercial, model)
+  VALUES (new.id, IFNULL(new.nombre_comercial, ''), IFNULL(new.model, ''));
+END;
+
 -- Indices
 CREATE INDEX IF NOT EXISTS idx_phones_nombre_comercial ON phones (nombre_comercial);
 CREATE INDEX IF NOT EXISTS idx_phones_status ON phones (status);
