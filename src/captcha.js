@@ -5,7 +5,7 @@ import { logger } from './logger.js';
 import { tgFetch, EFFECTS } from './telegram.js';
 import { escapeHtml } from './format.js';
 import { kbCaptcha } from './keyboards.js';
-import { sendRules } from './info.js';
+import { welcomeUserDM } from './info.js';
 
 export async function startCaptchaAndWelcome(bot, user, chat) {
   const viaDm = await startCaptcha(bot, user, chat);
@@ -44,7 +44,7 @@ export async function startCaptcha(bot, user, chat) {
 }
 
 // Botones cap:ok|fail (en DM o, si los DMs están cerrados, en el propio grupo)
-export async function handleCaptchaCallback(bot, { id, data, msg, chatId, userId }) {
+export async function handleCaptchaCallback(bot, { id, data, msg, chatId, userId, from }) {
   const parts = data.split(':'); // cap:ok|fail:chatId:userId
   const kind = parts[1];
   const cId = Number(parts[2]);
@@ -61,7 +61,8 @@ export async function handleCaptchaCallback(bot, { id, data, msg, chatId, userId
     if (inGroup && msg?.message_id) await bot.deleteMessage(chatId, msg.message_id);
     // El DM puede fallar si el usuario tiene DMs cerrados; se ignora
     await bot.sendMessage(userId, '✅ ¡Verificación completada! Ahora puedes participar en el grupo.', { message_effect_id: EFFECTS.party });
-    await sendRules(bot, userId, cId, 'private');
+    // Bienvenida completa con banner (incluye las reglas)
+    await welcomeUserDM(bot, from || { id: userId }, { id: cId });
   } else {
     await bot.answerCallbackQuery(id);
     // Expulsar usuario del grupo

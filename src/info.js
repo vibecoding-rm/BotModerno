@@ -7,6 +7,17 @@ import { kbWelcome } from './keyboards.js';
 import { startWizard } from './wizard.js';
 import { sendExportOptions } from './export.js';
 
+// Envía texto con el banner de portada si está configurado (caption tope 1024 chars)
+export async function sendWithBanner(bot, chatId, text, opts = {}) {
+  const config = await bot.getBotConfig();
+  if (config.welcome_photo && text.length <= 1024) {
+    const res = await bot.sendPhoto(chatId, config.welcome_photo, { ...opts, caption: text });
+    if (res?.ok) return res;
+    // file_id inválido: cae a texto
+  }
+  return bot.sendMessage(chatId, text, opts);
+}
+
 export async function sendWelcomeMessage(bot, chatId, userId, chatType) {
   try {
     const config = await bot.getBotConfig();
@@ -38,19 +49,12 @@ Esto es de todos y para todos. ✨`;
     }
 
     if (chatType === 'private') {
-      // Con banner configurado (foto + caption); el caption de Telegram tope 1024 chars
-      if (config.welcome_photo && welcomeMessage.length <= 1024) {
-        const res = await bot.sendPhoto(chatId, config.welcome_photo, {
-          caption: welcomeMessage,
-          parse_mode: 'plain',
-          reply_markup: kbWelcome(),
-          message_effect_id: EFFECTS.party
-        });
-        if (res?.ok) return;
-        // Si el file_id quedó inválido, cae al mensaje de texto
-      }
-      // Texto de bot_config (o fallback): sin parse_mode para no romper con caracteres sueltos
-      await bot.sendMessage(chatId, welcomeMessage, { reply_markup: kbWelcome(), parse_mode: 'plain', message_effect_id: EFFECTS.party });
+      // Banner de portada + texto de bot_config en plano (sin parse_mode)
+      await sendWithBanner(bot, chatId, welcomeMessage, {
+        parse_mode: 'plain',
+        reply_markup: kbWelcome(),
+        message_effect_id: EFFECTS.party
+      });
     } else {
       // En grupo: bienvenida corta en el propio grupo (sin DMs no solicitados)
       await bot.sendMessage(chatId, getShortRules());
@@ -95,8 +99,8 @@ export async function welcomeUserDM(bot, user, chat) {
         .replace(/{chat_title}/g, chatTitle);
     }
 
-    // Try DM; if user has blocked bot, ignore. Texto de bot_config → sin parse_mode.
-    await bot.sendMessage(user.id, msg, { parse_mode: 'plain' });
+    // Try DM (con banner); if user has blocked bot, ignore. Texto de bot_config → sin parse_mode.
+    await sendWithBanner(bot, user.id, msg, { parse_mode: 'plain', message_effect_id: EFFECTS.party });
   } catch (error) {
     logger.error('Error fetching welcome message from database', error);
     // Fallback to default welcome

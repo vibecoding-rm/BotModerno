@@ -15,7 +15,7 @@ import { handleWizardText, handleWizardCallback, handleProvincesCallback } from 
 import { handleModCallback, drainPendingNotifications } from './moderation.js';
 import { handleExportCallback } from './export.js';
 import { startCaptchaAndWelcome, startCaptcha, handleCaptchaCallback, kickExpiredCaptchas } from './captcha.js';
-import { welcomeUserDM, handleWelcomeCallback } from './info.js';
+import { welcomeUserDM, handleWelcomeCallback, sendWithBanner } from './info.js';
 
 export class SimpleTelegramBot {
   constructor(env) {
@@ -146,6 +146,19 @@ export class SimpleTelegramBot {
     return this.adminIds.includes(String(userId));
   }
 
+  // Link del grupo principal (cacheado en KV 24h): username público o invite link
+  async getGroupLink() {
+    const cached = await this.kvGet('group:link');
+    if (cached) return cached;
+    const groupId = this.allowedChatIds[0];
+    if (!groupId) return null;
+    const res = await tgFetch(this.token, 'getChat', { chat_id: Number(groupId) });
+    const c = res?.result || {};
+    const link = c.username ? `https://t.me/${c.username}` : (c.invite_link || null);
+    if (link) await this.kvSet('group:link', link, 86400);
+    return link;
+  }
+
   // Access control for groups
   groupAllowed(chat) {
     if (!chat) return false;
@@ -202,13 +215,15 @@ export class SimpleTelegramBot {
     // (una vez por minuto, para no responder en silencio y parecer roto)
     if (chatType === 'private' && !this.isAdmin(userId)) {
       if (!(await this.rateLimited(`dmredir:${userId}`, 1))) {
-        await this.sendMessage(chatId,
+        const link = await this.getGroupLink();
+        await sendWithBanner(this, chatId,
           '👋 Este bot trabaja en el grupo <b>Check de Bandas</b> 🇨🇺.\n\n' +
           'Allá puedes usar:\n' +
           '🔎 /revisar — buscar si un teléfono funciona en Cuba\n' +
           '📲 /subir — aportar tu experiencia\n' +
           '📡 /bandas — guía 4G\n\n' +
-          '🔔 Si te suscribes con /suscribir en el grupo, por aquí te llegarán los avisos de teléfonos nuevos.');
+          '🔔 Si te suscribes con /suscribir en el grupo, por aquí te llegarán los avisos de teléfonos nuevos.',
+          { reply_markup: link ? { inline_keyboard: [[{ text: '➡️ Entrar al grupo', url: link }]] } : undefined });
       }
       return;
     }
@@ -283,7 +298,7 @@ export class SimpleTelegramBot {
       }
 
       if (data.startsWith('cap:')) {
-        await handleCaptchaCallback(this, { id, data, msg, chatId, userId });
+        await handleCaptchaCallback(this, { id, data, msg, chatId, userId, from: cb.from });
         return;
       }
 
