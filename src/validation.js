@@ -90,8 +90,6 @@ export const botConfigSchema = z.object({
 // Environment variables validation
 export const envSchema = z.object({
   BOT_TOKEN: z.string().min(1),
-  SUPABASE_URL: z.string().url(),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   TG_WEBHOOK_SECRET: z.string().min(10),
   ADMIN_TG_IDS: z.string().optional(),
   ALLOWED_CHAT_IDS: z.string().optional(),

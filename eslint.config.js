@@ -13,6 +13,9 @@ export default [
         URL: 'readonly',
         globalThis: 'readonly',
         TextEncoder: 'readonly',
+        Blob: 'readonly',
+        FormData: 'readonly',
+        Request: 'readonly',
       },
     },
     rules: {

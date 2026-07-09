@@ -1,9 +1,10 @@
 // tests/wizard.unit.test.js — unit tests de los helpers puros del bot
 import {
   normalizeText, toUpperModel, parseYesNo, splitNormList,
-  parseProvincesText, parseJsonArray, kbProvinces, CUBA_PROVINCES,
+  parseProvincesText, parseJsonArray, CUBA_PROVINCES,
   escapeHtml, formatSearchResults
-} from '../src/bot-simple.js';
+} from '../src/format.js';
+import { kbProvinces } from '../src/keyboards.js';
 
 describe('normalizeText', () => {
   test('quita acentos, colapsa espacios y pasa a minúsculas', () => {
