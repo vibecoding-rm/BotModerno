@@ -2,7 +2,7 @@
  * Verificación anti-spam de miembros nuevos (estado en KV, botones cap:).
  */
 import { logger } from './logger.js';
-import { tgFetch } from './telegram.js';
+import { tgFetch, EFFECTS } from './telegram.js';
 import { escapeHtml } from './format.js';
 import { kbCaptcha } from './keyboards.js';
 import { sendRules } from './info.js';
@@ -60,7 +60,7 @@ export async function handleCaptchaCallback(bot, { id, data, msg, chatId, userId
     // Limpiar el mensaje de captcha del grupo si se verificó ahí
     if (inGroup && msg?.message_id) await bot.deleteMessage(chatId, msg.message_id);
     // El DM puede fallar si el usuario tiene DMs cerrados; se ignora
-    await bot.sendMessage(userId, '✅ ¡Verificación completada! Ahora puedes participar en el grupo.');
+    await bot.sendMessage(userId, '✅ ¡Verificación completada! Ahora puedes participar en el grupo.', { message_effect_id: EFFECTS.party });
     await sendRules(bot, userId, cId, 'private');
   } else {
     await bot.answerCallbackQuery(id);

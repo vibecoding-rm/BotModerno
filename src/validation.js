@@ -17,6 +17,8 @@ export const telegramUpdateSchema = z.object({
       title: z.string().optional(),
     }),
     text: z.string().optional(),
+    caption: z.string().optional(),
+    photo: z.array(z.object({ file_id: z.string() })).optional(),
     new_chat_members: z.array(z.object({
       id: z.number(),
       username: z.string().optional(),

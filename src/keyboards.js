@@ -14,11 +14,12 @@ export function kbBackCancel() {
   ]] };
 }
 
+// style ("primary"/"success"/"danger", Bot API 9.4) colorea el botón; clientes viejos lo ignoran
 export function kbWorks() {
   return { inline_keyboard: [
     [
-      { text: '👍 Sí', callback_data: 'wiz:works_yes' },
-      { text: '👎 No', callback_data: 'wiz:works_no' }
+      { text: '👍 Sí', callback_data: 'wiz:works_yes', style: 'success' },
+      { text: '👎 No', callback_data: 'wiz:works_no', style: 'danger' }
     ],
     [
       { text: 'Atrás', callback_data: 'wiz:back' },
@@ -30,8 +31,8 @@ export function kbWorks() {
 export function kbConfirm() {
   return { inline_keyboard: [[
     { text: 'Atrás', callback_data: 'wiz:back' },
-    { text: 'Confirmar', callback_data: 'wiz:confirm' },
-    { text: 'Cancelar', callback_data: 'wiz:cancel' }
+    { text: 'Confirmar', callback_data: 'wiz:confirm', style: 'success' },
+    { text: 'Cancelar', callback_data: 'wiz:cancel', style: 'danger' }
   ]] };
 }
 
@@ -63,8 +64,8 @@ export function kbProvinces(selected = [], ownerId = '') {
 export function kbModeration(id) {
   return { inline_keyboard: [
     [
-      { text: '✅ Aprobar', callback_data: `mod:approve:${id}` },
-      { text: '❌ Rechazar', callback_data: `mod:reject:${id}` }
+      { text: '✅ Aprobar', callback_data: `mod:approve:${id}`, style: 'success' },
+      { text: '❌ Rechazar', callback_data: `mod:reject:${id}`, style: 'danger' }
     ],
     [
       { text: '⏭ Saltar', callback_data: `mod:next:${id}` }
@@ -112,8 +113,8 @@ export function kbExport() {
 export function kbCaptcha(chatId, userId) {
   return {
     inline_keyboard: [[
-      { text: '✅ Soy humano', callback_data: `cap:ok:${chatId}:${userId}` },
-      { text: '❌ No pasar', callback_data: `cap:fail:${chatId}:${userId}` }
+      { text: '✅ Soy humano', callback_data: `cap:ok:${chatId}:${userId}`, style: 'success' },
+      { text: '❌ No pasar', callback_data: `cap:fail:${chatId}:${userId}`, style: 'danger' }
     ]]
   };
 }

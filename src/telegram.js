@@ -3,6 +3,14 @@
  */
 import { logger } from './logger.js';
 
+// IDs de efectos animados gratuitos (message_effect_id, SOLO chats privados)
+export const EFFECTS = {
+  party: '5046509860389126442', // 🎉
+  fire: '5104841245755180586',  // 🔥
+  like: '5107584321108051014',  // 👍
+  heart: '5159385139981059251'  // ❤️
+};
+
 // Utility: safe JSON fetch wrapper for Telegram API
 export async function tgFetch(token, method, payload) {
   const url = `https://api.telegram.org/bot${token}/${method}`;

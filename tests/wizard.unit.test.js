@@ -130,6 +130,13 @@ describe('formatSearchResults', () => {
     expect(formatSearchResults('q', [row()], 0, 1)).not.toContain('❓');
     expect(formatSearchResults('q', [row({ works: null })], 0, 1)).toContain('❓ sin confirmar');
   });
+  test('observaciones largas van en blockquote expandable; cortas en línea', () => {
+    const larga = 'x'.repeat(120);
+    expect(formatSearchResults('q', [row({ observations: larga })], 0, 1))
+      .toContain(`<blockquote expandable>💬 ${larga}</blockquote>`);
+    expect(formatSearchResults('q', [row({ observations: 'corta' })], 0, 1))
+      .toContain('    💬 corta');
+  });
 });
 
 describe('kbProvinces', () => {

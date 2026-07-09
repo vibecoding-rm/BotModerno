@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS bot_config (
   id INTEGER PRIMARY KEY CHECK (id = 1) DEFAULT 1,
   rules TEXT DEFAULT '',
   welcome TEXT DEFAULT '',
+  welcome_photo TEXT DEFAULT '',   -- file_id de Telegram del banner de /start (se setea con /banner)
   is_active BOOLEAN DEFAULT 1,
   short_welcome BOOLEAN DEFAULT 1,
   captcha_enabled BOOLEAN DEFAULT 1,

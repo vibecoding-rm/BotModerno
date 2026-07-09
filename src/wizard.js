@@ -7,13 +7,31 @@ import { normalizeText, toUpperModel, parseYesNo, splitNormList, parseProvincesT
 import { kbCancel, kbBackCancel, kbWorks, kbConfirm, kbProvinces } from './keyboards.js';
 import { notifyAdminsNewSubmission } from './moderation.js';
 
+const STEP_NUM = {
+  awaiting_name: 1, awaiting_model: 2, awaiting_works: 3,
+  awaiting_bands: 4, awaiting_provinces: 5, awaiting_obs: 6
+};
+
+// Barra de progreso del wizard: "Paso 3/6 · ▰▰▰▱▱▱"
+function progress(step) {
+  const n = STEP_NUM[step];
+  if (!n) return '';
+  return `<b>Paso ${n}/6</b> · ${'▰'.repeat(n)}${'▱'.repeat(6 - n)}\n`;
+}
+
 const PROMPTS = {
   awaiting_name: 'Nombre comercial (ej: "Redmi Note 12").',
   awaiting_model: 'Modelo exacto (ej: "2209116AG").',
   awaiting_works: '¿Funciona en Cuba? Responde "sí" o "no".',
   awaiting_bands: 'Indica las bandas separadas por coma:\n\n📡 Bandas específicas: B3,B7,B28,B20,B38\n📶 Tecnologías: 2G,3G,4G,5G\n❓ O escribe "desconocido"',
+  awaiting_provinces: '📍 ¿En qué provincias lo probaste? Toca para marcar/desmarcar y pulsa "✔️ Listo" (o escribe los nombres separados por coma).',
   awaiting_obs: 'Observaciones adicionales (opcional). Escribe "-" para omitir.'
 };
+
+// Prompt de un paso con su barra de progreso
+function stepPrompt(step) {
+  return progress(step) + PROMPTS[step];
+}
 
 export async function getDraft(bot, tgId) {
   const row = await bot.db.prepare("SELECT * FROM submission_drafts WHERE tg_id = ?1").bind(String(tgId)).first();
@@ -79,7 +97,7 @@ export async function clearDraft(bot, tgId) {
 
 export async function startWizard(bot, chatId, userId, replyTo) {
   await setDraft(bot, userId, { step: 'awaiting_name', commercial_name: null, model: null, works: null, bands: null, provinces: null, observations: null });
-  await bot.sendMessage(chatId, '📲 Vamos a subir un modelo. Dime el nombre comercial (ej: "Redmi Note 12").', {
+  await bot.sendMessage(chatId, progress('awaiting_name') + '📲 Vamos a subir un modelo. Dime el nombre comercial (ej: "Redmi Note 12").', {
     reply_markup: kbCancel(),
     reply_to_message_id: replyTo
   });
@@ -103,7 +121,7 @@ export async function handleWizardText(bot, chatId, userId, text, replyTo) {
           return true;
         }
         await setDraft(bot, userId, { commercial_name: text, step: 'awaiting_model' });
-        await send(PROMPTS.awaiting_model, kbBackCancel());
+        await send(stepPrompt('awaiting_model'), kbBackCancel());
         return true;
       }
       case 'awaiting_model': {
@@ -112,7 +130,7 @@ export async function handleWizardText(bot, chatId, userId, text, replyTo) {
           return true;
         }
         await setDraft(bot, userId, { model: text, step: 'awaiting_works' });
-        await send(PROMPTS.awaiting_works, kbWorks());
+        await send(stepPrompt('awaiting_works'), kbWorks());
         return true;
       }
       case 'awaiting_works': {
@@ -123,23 +141,23 @@ export async function handleWizardText(bot, chatId, userId, text, replyTo) {
         }
         if (yn) {
           await setDraft(bot, userId, { works: true, step: 'awaiting_bands' });
-          await send(PROMPTS.awaiting_bands, kbBackCancel());
+          await send(stepPrompt('awaiting_bands'), kbBackCancel());
         } else {
           await setDraft(bot, userId, { works: false, step: 'awaiting_obs' });
-          await send('Añade observaciones (ej: "sin señal 4G en Holguín").', kbBackCancel());
+          await send(progress('awaiting_obs') + 'Añade observaciones (ej: "sin señal 4G en Holguín").', kbBackCancel());
         }
         return true;
       }
       case 'awaiting_bands': {
         const bands = text.toLowerCase() === 'desconocido' ? [] : splitNormList(text);
         await setDraft(bot, userId, { bands, provinces: [], step: 'awaiting_provinces' });
-        await send('📍 ¿En qué provincias lo probaste? Toca para marcar/desmarcar y pulsa "✔️ Listo" (o escribe los nombres separados por coma).', kbProvinces([], userId));
+        await send(stepPrompt('awaiting_provinces'), kbProvinces([], userId));
         return true;
       }
       case 'awaiting_provinces': {
         const provinces = text === '-' ? [] : parseProvincesText(text);
         await setDraft(bot, userId, { provinces, step: 'awaiting_obs' });
-        await send(PROMPTS.awaiting_obs, kbBackCancel());
+        await send(stepPrompt('awaiting_obs'), kbBackCancel());
         return true;
       }
       case 'awaiting_obs': {
@@ -165,7 +183,7 @@ export async function handleWizardText(bot, chatId, userId, text, replyTo) {
           return true;
         }
         if (yn) {
-          await submitPhone(bot, userId, chatId);
+          await submitPhone(bot, userId, chatId, replyTo);
         } else {
           await cancelWizard(bot, chatId, userId);
         }
@@ -197,7 +215,7 @@ export async function handleProvincesCallback(bot, { id, data, msg, chatId, user
   if (action === 'done' || action === 'skip') {
     const provinces = action === 'skip' ? [] : (draft.provinces || []);
     await setDraft(bot, userId, { provinces, step: 'awaiting_obs' });
-    await bot.sendMessage(chatId, PROMPTS.awaiting_obs, { reply_markup: kbBackCancel() });
+    await bot.sendMessage(chatId, stepPrompt('awaiting_obs'), { reply_markup: kbBackCancel() });
     return;
   }
   if (action === 't') {
@@ -210,7 +228,7 @@ export async function handleProvincesCallback(bot, { id, data, msg, chatId, user
   }
 }
 
-export async function handleWizardCallback(bot, { id, data, chatId, userId }) {
+export async function handleWizardCallback(bot, { id, data, msg, chatId, userId }) {
   await bot.answerCallbackQuery(id);
 
   const draft = await getDraft(bot, userId);
@@ -236,22 +254,22 @@ export async function handleWizardCallback(bot, { id, data, chatId, userId }) {
     // re-prompt according to prev step
     switch (prev) {
       case 'awaiting_name':
-        await bot.sendMessage(chatId, PROMPTS.awaiting_name, { reply_markup: kbCancel() });
+        await bot.sendMessage(chatId, stepPrompt('awaiting_name'), { reply_markup: kbCancel() });
         break;
       case 'awaiting_model':
-        await bot.sendMessage(chatId, PROMPTS.awaiting_model, { reply_markup: kbBackCancel() });
+        await bot.sendMessage(chatId, stepPrompt('awaiting_model'), { reply_markup: kbBackCancel() });
         break;
       case 'awaiting_works':
-        await bot.sendMessage(chatId, PROMPTS.awaiting_works, { reply_markup: kbWorks() });
+        await bot.sendMessage(chatId, stepPrompt('awaiting_works'), { reply_markup: kbWorks() });
         break;
       case 'awaiting_bands':
-        await bot.sendMessage(chatId, PROMPTS.awaiting_bands, { reply_markup: kbBackCancel() });
+        await bot.sendMessage(chatId, stepPrompt('awaiting_bands'), { reply_markup: kbBackCancel() });
         break;
       case 'awaiting_provinces':
-        await bot.sendMessage(chatId, '📍 ¿En qué provincias lo probaste? Toca para marcar/desmarcar y pulsa "✔️ Listo".', { reply_markup: kbProvinces(draft.provinces || [], userId) });
+        await bot.sendMessage(chatId, progress('awaiting_provinces') + '📍 ¿En qué provincias lo probaste? Toca para marcar/desmarcar y pulsa "✔️ Listo".', { reply_markup: kbProvinces(draft.provinces || [], userId) });
         break;
       case 'awaiting_obs':
-        await bot.sendMessage(chatId, 'Observaciones (opcional). Escribe "-" para omitir.', { reply_markup: kbBackCancel() });
+        await bot.sendMessage(chatId, stepPrompt('awaiting_obs'), { reply_markup: kbBackCancel() });
         break;
     }
     return;
@@ -266,17 +284,17 @@ export async function handleWizardCallback(bot, { id, data, chatId, userId }) {
   if (data === 'wiz:works_no') {
     if (draft.step === 'awaiting_works') {
       await setDraft(bot, userId, { works: false, step: 'awaiting_obs' });
-      await bot.sendMessage(chatId, 'Añade observaciones (ej: "sin señal 4G en Holguín").', { reply_markup: kbBackCancel() });
+      await bot.sendMessage(chatId, progress('awaiting_obs') + 'Añade observaciones (ej: "sin señal 4G en Holguín").', { reply_markup: kbBackCancel() });
     }
     return;
   }
   if (data === 'wiz:confirm' && draft.step === 'confirm') {
-    await submitPhone(bot, userId, chatId);
+    await submitPhone(bot, userId, chatId, msg?.message_id);
     return;
   }
 }
 
-export async function submitPhone(bot, userId, chatId) {
+export async function submitPhone(bot, userId, chatId, reactToMsgId) {
   const d = await getDraft(bot, userId);
   if (!d) return;
 
@@ -326,6 +344,8 @@ export async function submitPhone(bot, userId, chatId) {
   }
 
   await clearDraft(bot, userId);
+  // Celebrar con una reacción sobre el mensaje que confirmó (si lo tenemos)
+  if (reactToMsgId) await bot.setMessageReaction(chatId, reactToMsgId, '🎉');
   await bot.sendMessage(chatId, '¡Hecho! Tu propuesta quedó guardada y pasará a revisión. ✅\nCuando un admin la apruebe aparecerá en /revisar.');
   if (insertedId) await notifyAdminsNewSubmission(bot, insertedId);
 }

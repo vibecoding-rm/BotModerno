@@ -39,7 +39,22 @@ export class SimpleTelegramBot {
       reply_to_message_id: opts.reply_to_message_id
     };
     if (opts.parse_mode !== 'plain') payload.parse_mode = opts.parse_mode || 'HTML';
+    // Efectos animados: Telegram solo los acepta en chats privados
+    if (opts.message_effect_id) payload.message_effect_id = opts.message_effect_id;
     return tgFetch(this.token, 'sendMessage', payload);
+  }
+  async sendPhoto(chat_id, photo, opts = {}) {
+    const payload = { chat_id, photo, caption: opts.caption, reply_markup: opts.reply_markup };
+    if (opts.caption && opts.parse_mode !== 'plain') payload.parse_mode = opts.parse_mode || 'HTML';
+    if (opts.message_effect_id) payload.message_effect_id = opts.message_effect_id;
+    return tgFetch(this.token, 'sendPhoto', payload);
+  }
+  async setMessageReaction(chat_id, message_id, emoji) {
+    return tgFetch(this.token, 'setMessageReaction', {
+      chat_id,
+      message_id,
+      reaction: [{ type: 'emoji', emoji }]
+    });
   }
   async sendChatAction(chat_id, action) {
     return tgFetch(this.token, 'sendChatAction', { chat_id, action });
@@ -119,6 +134,7 @@ export class SimpleTelegramBot {
     this._config = {
       rules: row?.rules || '',
       welcome: row?.welcome || '',
+      welcome_photo: row?.welcome_photo || '',
       captcha_enabled: row ? (row.captcha_enabled === 1 || row.captcha_enabled === true) : true,
       captcha_timeout: Number(row?.captcha_timeout) || 120,
       auto_approve_join: row ? (row.auto_approve_join === 1 || row.auto_approve_join === true) : true
@@ -185,6 +201,17 @@ export class SimpleTelegramBot {
     // En privado el bot solo responde al dueño/admins
     if (chatType === 'private' && !this.isAdmin(userId)) return;
 
+    // Admin en privado: foto con caption "/banner" -> guardar banner de bienvenida
+    if (chatType === 'private' && Array.isArray(msg.photo) && msg.photo.length) {
+      const caption = (msg.caption || '').trim().toLowerCase();
+      if (caption === '/banner') {
+        const fileId = msg.photo[msg.photo.length - 1].file_id; // la de mayor resolución
+        await this.db.prepare("UPDATE bot_config SET welcome_photo = ?1 WHERE id = 1").bind(fileId).run();
+        await this.sendMessage(chatId, '🖼 Banner de bienvenida guardado. Pruébalo con /start.\nPara quitarlo: /banner quitar');
+      }
+      return;
+    }
+
     if (text.startsWith('/')) {
       await onCommand(this, { chatId, chatType, userId, msg, text });
       return;
@@ -249,7 +276,7 @@ export class SimpleTelegramBot {
       }
 
       if (data.startsWith('wiz:')) {
-        await handleWizardCallback(this, { id, data, chatId, userId });
+        await handleWizardCallback(this, { id, data, msg, chatId, userId });
         return;
       }
     } catch (e) {

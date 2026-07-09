@@ -79,6 +79,20 @@ export async function onCommand(bot, { chatId, chatType, userId, msg, text }) {
       await sendPendingReview(bot, chatId, 0);
       break;
     }
+    case '/banner': {
+      if (!bot.isAdmin(userId)) return;
+      if (chatType !== 'private') {
+        await bot.sendMessage(chatId, 'El banner se configura por DM.');
+        return;
+      }
+      if (argStr.toLowerCase() === 'quitar') {
+        await bot.db.prepare("UPDATE bot_config SET welcome_photo = '' WHERE id = 1").run();
+        await bot.sendMessage(chatId, '🗑 Banner de bienvenida eliminado. /start vuelve a ser solo texto.');
+        return;
+      }
+      await bot.sendMessage(chatId, '🖼 Envíame una <b>foto</b> con el texto <code>/banner</code> como pie de foto y la usaré como banner de /start.\nPara quitar el actual: /banner quitar');
+      break;
+    }
     case '/suscribir': {
       await handleSubscribe(bot, chatId, userId);
       break;

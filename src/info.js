@@ -2,6 +2,7 @@
  * Textos informativos: bienvenida, reglas, estadísticas, guía de bandas y ayuda.
  */
 import { logger } from './logger.js';
+import { EFFECTS } from './telegram.js';
 import { kbWelcome } from './keyboards.js';
 import { startWizard } from './wizard.js';
 import { sendExportOptions } from './export.js';
@@ -37,8 +38,19 @@ Esto es de todos y para todos. ✨`;
     }
 
     if (chatType === 'private') {
+      // Con banner configurado (foto + caption); el caption de Telegram tope 1024 chars
+      if (config.welcome_photo && welcomeMessage.length <= 1024) {
+        const res = await bot.sendPhoto(chatId, config.welcome_photo, {
+          caption: welcomeMessage,
+          parse_mode: 'plain',
+          reply_markup: kbWelcome(),
+          message_effect_id: EFFECTS.party
+        });
+        if (res?.ok) return;
+        // Si el file_id quedó inválido, cae al mensaje de texto
+      }
       // Texto de bot_config (o fallback): sin parse_mode para no romper con caracteres sueltos
-      await bot.sendMessage(chatId, welcomeMessage, { reply_markup: kbWelcome(), parse_mode: 'plain' });
+      await bot.sendMessage(chatId, welcomeMessage, { reply_markup: kbWelcome(), parse_mode: 'plain', message_effect_id: EFFECTS.party });
     } else {
       // En grupo: bienvenida corta en el propio grupo (sin DMs no solicitados)
       await bot.sendMessage(chatId, getShortRules());
@@ -167,13 +179,12 @@ export async function sendBandsGuide(bot, chatId) {
 
 ✅ <b>Lo clave:</b> para tener 4G en Cuba, tu teléfono debe soportar <b>LTE B3 (1800)</b>.
 
-🔍 <b>¿Cómo saber las bandas de tu teléfono?</b>
+<blockquote expandable>🔍 <b>¿Cómo saber las bandas de tu teléfono?</b>
 1. Mira el modelo exacto en Ajustes → Acerca del teléfono.
 2. Búscalo en gsmarena.com o kimovil.com → sección "Red/Network".
 3. Verifica que aparezca LTE B3 (1800). Si además trae B7, mejor.
 
-⚠️ <b>Cuidado con teléfonos de operadoras de EE.UU.</b> (Cricket, Boost, Metro...): muchos vienen bloqueados de fábrica o sin B3 → revisa antes de comprar.
-
+⚠️ <b>Cuidado con teléfonos de operadoras de EE.UU.</b> (Cricket, Boost, Metro...): muchos vienen bloqueados de fábrica o sin B3 → revisa antes de comprar.</blockquote>
 💡 Usa /revisar &lt;modelo&gt; para ver la experiencia real de la comunidad con ese modelo, y /subir para aportar la tuya.`;
   await bot.sendMessage(chatId, guide);
 }
@@ -192,7 +203,7 @@ export async function sendHelp(bot, chatId) {
 • /id - Ver información de IDs
 • /reportar - Reportar problema
 
-📱 <b>Cómo usar:</b>
+<blockquote expandable>📱 <b>Cómo usar:</b>
 1. <b>Agregar teléfono:</b> Usa /subir en el grupo y sigue los pasos
 2. <b>Buscar teléfonos:</b> Usa /revisar Samsung A14
 3. <b>Ver reglas:</b> Usa /reglas
@@ -201,8 +212,7 @@ export async function sendHelp(bot, chatId) {
 🔧 <b>Para administradores:</b>
 • /pendientes - Revisar propuestas pendientes (aprobar/rechazar)
 • /fijar - Mostrar reglas cortas en grupo
-• /id - Ver información detallada
-
+• /banner - Configurar la foto de bienvenida (en DM)</blockquote>
 ❓ <b>¿Necesitas más ayuda?</b>
 Contacta a los administradores del grupo.`;
 

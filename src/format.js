@@ -104,7 +104,14 @@ export function formatSearchResults(query, matches, offset, total) {
     if (r.provinces.length) meta.push(`📍 ${escapeHtml(r.provinces.join(', '))}`);
     const lines = [head];
     if (meta.length) lines.push(`    ${meta.join(' · ')}`);
-    if (r.observations) lines.push(`    💬 ${escapeHtml(r.observations)}`);
+    if (r.observations) {
+      // Observaciones largas: cita colapsable nativa para no llenar la pantalla
+      if (r.observations.length > 100) {
+        lines.push(`<blockquote expandable>💬 ${escapeHtml(r.observations)}</blockquote>`);
+      } else {
+        lines.push(`    💬 ${escapeHtml(r.observations)}`);
+      }
+    }
     return lines.join('\n');
   });
   let legend = '✅ funciona en Cuba · ❌ no funciona';
