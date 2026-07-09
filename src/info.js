@@ -138,29 +138,28 @@ export function getShortRules() {
 
 export async function sendStats(bot, chatId) {
   try {
-    const phonesRow = await bot.db.prepare("SELECT COUNT(*) AS n FROM phones WHERE status = 'approved'").first();
+    const counts = await bot.db.prepare(
+      "SELECT COUNT(*) AS total, SUM(CASE WHEN works=1 THEN 1 ELSE 0 END) AS works_yes, MAX(created_at) AS last FROM phones WHERE status = 'approved'"
+    ).first();
+    const pendingRow = await bot.db.prepare("SELECT COUNT(*) AS n FROM phones WHERE status = 'pending'").first();
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const eventsRow = await bot.db.prepare("SELECT COUNT(*) AS n FROM events WHERE created_at >= ?1").bind(cutoff).first();
 
-    const totalPhones = phonesRow?.n || 0;
-    const eventsToday = eventsRow?.n || 0;
+    const total = counts?.total || 0;
+    const worksYes = counts?.works_yes || 0;
+    const worksNo = total - worksYes;
+    const lastDate = counts?.last ? String(counts.last).slice(0, 10) : '—';
 
     const statsMessage = `📊 <b>Estadísticas de CubaModel</b>
 
-📱 <b>Teléfonos en la base:</b>
-• Total aprobados: ${totalPhones}
-• Última actualización: ${new Date().toLocaleDateString()}
+📱 Teléfonos aprobados: <b>${total}</b>
+    ✅ funcionan en Cuba: ${worksYes} · ❌ no funcionan: ${worksNo}
+⏳ En cola de revisión: ${pendingRow?.n || 0}
+🕐 Último aporte aprobado: ${lastDate}
+📈 Actividad en 24h: ${eventsRow?.n || 0} eventos
 
-📈 <b>Actividad:</b>
-• Eventos hoy: ${eventsToday}
-• Estado: ✅ Activo
-
-🌐 <b>Información:</b>
-• Base de datos: Abierta y gratuita
-• Proyecto: Comunitario
-• Región: Cuba 🇨🇺
-
-💡 Usa /subir para agregar más teléfonos`;
+🌐 Base abierta y gratuita · proyecto comunitario · Cuba 🇨🇺
+💡 Súmate con /subir o descárgala con /exportar`;
 
     await bot.sendMessage(chatId, statsMessage);
   } catch (error) {

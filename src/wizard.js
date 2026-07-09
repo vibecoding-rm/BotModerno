@@ -105,7 +105,7 @@ export async function startWizard(bot, chatId, userId, replyTo) {
 
 export async function cancelWizard(bot, chatId, userId) {
   await clearDraft(bot, userId);
-  await bot.sendMessage(chatId, 'Listo, cancelado. Puedes empezar de nuevo con /subir.');
+  await bot.sendMessage(chatId, '🚫 Asistente cancelado. Empieza de nuevo cuando quieras con /subir.');
 }
 
 export async function handleWizardText(bot, chatId, userId, text, replyTo) {
@@ -346,6 +346,9 @@ export async function submitPhone(bot, userId, chatId, reactToMsgId) {
   await clearDraft(bot, userId);
   // Celebrar con una reacción sobre el mensaje que confirmó (si lo tenemos)
   if (reactToMsgId) await bot.setMessageReaction(chatId, reactToMsgId, '🎉');
-  await bot.sendMessage(chatId, '¡Hecho! Tu propuesta quedó guardada y pasará a revisión. ✅\nCuando un admin la apruebe aparecerá en /revisar.');
+  await bot.sendMessage(chatId,
+    '✅ <b>¡Propuesta guardada!</b>\n' +
+    'Pasará a revisión y, cuando un admin la apruebe, aparecerá en /revisar.\n\n' +
+    '🔔 ¿Quieres enterarte de cada teléfono nuevo? Usa /suscribir.');
   if (insertedId) await notifyAdminsNewSubmission(bot, insertedId);
 }

@@ -136,22 +136,28 @@ CREATE INDEX IF NOT EXISTS idx_events_tg_id ON events (tg_id);
 -- Default configuration
 INSERT OR IGNORE INTO bot_config (id, rules, welcome)
 VALUES (1,
-  '1) Respeto; nada de insultos ni spam.
-2) No ventas, solo compatibilidad de teléfonos en Cuba.
-3) Aporta datos reales con /subir.
-4) Usa /reportar para avisar de errores.
-5) La base es de todos, nadie puede privatizarla.',
-  '👋 ¡Bienvenido {fullname} a CubaModel! 🇨🇺📱
+  '📜 Reglas de CubaModel
 
-Este proyecto nació porque antes intentaron cobrar por una base que la comunidad creó gratis.
-Aquí todo es distinto: la información será siempre abierta y descargable.
+1️⃣ Respeto: nada de insultos ni spam.
+2️⃣ No ventas ni anuncios: solo compatibilidad de teléfonos en Cuba.
+3️⃣ Aporta datos reales con /subir.
+4️⃣ ¿Error en los datos? Avísanos con /reportar.
+5️⃣ La base es de todos: abierta, descargable y nadie puede privatizarla.',
+  '👋 ¡Hola {fullname}! Bienvenido a CubaModel 🇨🇺📱
 
-📜 Reglas:
-1) Respeto; nada de insultos ni spam.
-2) No ventas, solo compatibilidad de teléfonos en Cuba.
-3) Aporta datos reales con /subir.
-4) Usa /reportar para avisar de errores.
-5) La base es de todos, nadie puede privatizarla.
+La base comunitaria para saber qué teléfonos funcionan con las redes de ETECSA.
 
-Gracias por sumarte. Esto es de todos y para todos. ✨'
+🔎 /revisar — busca tu modelo
+📲 /subir — aporta tu experiencia
+📡 /bandas — guía 4G (la clave: LTE B3)
+📥 /exportar — descárgala completa, siempre gratis
+
+📜 Reglas de la casa:
+1️⃣ Respeto: nada de insultos ni spam
+2️⃣ No ventas: solo compatibilidad
+3️⃣ Aporta datos reales
+4️⃣ /reportar si ves un error
+5️⃣ La base es de todos y siempre será abierta
+
+✨ Esto es de todos y para todos.'
 );

@@ -4,7 +4,7 @@
  * si no hay resultados o el índice falla, cae al LIKE por subcadena de siempre.
  */
 import { logger } from './logger.js';
-import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults } from './format.js';
+import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, escapeHtml } from './format.js';
 
 const PAGE = 6;
 
@@ -47,7 +47,10 @@ export async function searchByModel(bot, chatId, query, offset = 0, editMessageI
     const { total, rows } = found;
 
     if (!total) {
-      await bot.sendMessage(chatId, 'No encontramos ese modelo. ¿Quieres usar /subir para proponerlo?');
+      await bot.sendMessage(chatId,
+        `🔎 No encontramos nada para «${escapeHtml(query)}».\n\n` +
+        '💡 Prueba con menos letras (solo la marca o el código del modelo).\n' +
+        '📲 ¿Lo tienes en la mano? Proponlo con /subir y ayuda a la comunidad.');
       return;
     }
 

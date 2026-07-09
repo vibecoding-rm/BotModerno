@@ -147,7 +147,7 @@ export async function handleReport(bot, chatId, userId, text) {
     await bot.db.prepare(
       "INSERT INTO reports (tg_id, chat_id, model, reason, created_at) VALUES (?1, ?2, NULL, ?3, ?4)"
     ).bind(String(userId), String(chatId), reason, createdAt).run();
-    await bot.sendMessage(chatId, 'Reporte recibido. Gracias por avisar.');
+    await bot.sendMessage(chatId, '📨 <b>Reporte recibido.</b> Gracias por avisar — un admin lo revisará.');
   } catch (e) {
     logger.error('handleReport error', e, { chatId, userId });
     await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
@@ -160,7 +160,9 @@ export async function handleSubscribe(bot, chatId, userId) {
     await bot.db.prepare(
       "INSERT OR REPLACE INTO subscriptions (tg_id, created_at) VALUES (?1, ?2)"
     ).bind(String(userId), createdAt).run();
-    await bot.sendMessage(chatId, 'Suscripción activada. 📣');
+    await bot.sendMessage(chatId,
+      '🔔 <b>Suscripción activada.</b> Te avisaré cuando se aprueben teléfonos nuevos.\n' +
+      '💡 Los avisos llegan por privado: tócame el perfil y dale "Iniciar" una vez para que pueda escribirte.');
   } catch (e) {
     logger.error('handleSubscribe error', e, { chatId, userId });
     await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
@@ -170,7 +172,7 @@ export async function handleSubscribe(bot, chatId, userId) {
 export async function handleUnsubscribe(bot, chatId, userId) {
   try {
     await bot.db.prepare("DELETE FROM subscriptions WHERE tg_id = ?1").bind(String(userId)).run();
-    await bot.sendMessage(chatId, 'Suscripción cancelada. 🔕');
+    await bot.sendMessage(chatId, '🔕 Suscripción cancelada. No recibirás más avisos.');
   } catch (e) {
     logger.error('handleUnsubscribe error', e, { chatId, userId });
     await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
