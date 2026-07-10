@@ -89,17 +89,47 @@ export function escapeHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Normaliza un nombre de equipo igual que el import de device_bands, para cruzar
+// phones.commercial_name con device_bands.norm_name.
+export function normDeviceName(s) {
+  return (s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Veredicto de compatibilidad Cuba ESTIMADO por bandas (no es teléfono probado).
+// bandRow: fila de device_bands { bands_4g, has_b3 } o null. Devuelve {ok, text} o null.
+// Clave ETECSA: LTE B3 (1800 MHz) para el 4G.
+export function cubaBandVerdict(bandRow) {
+  if (!bandRow) return null;
+  const b4 = bandRow.bands_4g || '';
+  if (!/\d/.test(b4)) return null; // sin números de banda no estimamos
+  const disclaimer = '⚠️ <i>Estimado por sus bandas — NO probado por la comunidad.</i>';
+  if (bandRow.has_b3) {
+    return { ok: true, text: `📶 <b>Compatible por bandas</b> (estimado): trae <b>LTE B3</b> (1800 MHz), la banda principal de ETECSA.\n${disclaimer}` };
+  }
+  return { ok: false, text: `📵 <b>Dudoso por bandas</b> (estimado): no figura <b>LTE B3</b> (1800 MHz), la principal de ETECSA; el 4G podría no andar.\n${disclaimer}` };
+}
+
 // Ficha individual de un teléfono (vista de detalle con votos). Nombre completo,
-// sin truncar, con todo el ancho. r ya viene de parsePhoneRow; tally = {up, down}.
-export function formatPhoneDetail(r, tally = { up: 0, down: 0 }) {
-  const w = r.works === true ? '✅ Funciona en Cuba'
-    : (r.works === false ? '❌ No funciona en Cuba' : '❓ Compatibilidad sin confirmar');
+// sin truncar, con todo el ancho. r ya viene de parsePhoneRow; tally = {up, down};
+// bandVerdict = salida de cubaBandVerdict() o null.
+export function formatPhoneDetail(r, tally = { up: 0, down: 0 }, bandVerdict = null) {
+  const w = r.works === true ? '✅ Funciona en Cuba (confirmado por la comunidad)'
+    : (r.works === false ? '❌ No funciona en Cuba (reporte de la comunidad)' : '❓ Compatibilidad sin confirmar por la comunidad');
   const lines = [`📱 <b>${escapeHtml(r.commercial_name)}</b>`];
   const showModel = r.model && r.model.toUpperCase() !== (r.commercial_name || '').trim().toUpperCase();
   if (showModel) lines.push(`🔩 Modelo: <code>${escapeHtml(r.model)}</code>`);
   lines.push('');
   lines.push(w);
-  if (r.bands && r.bands.length) lines.push(`📶 Bandas: ${escapeHtml(r.bands.join(', '))}`);
+  if (bandVerdict) {
+    lines.push('');
+    lines.push(bandVerdict.text);
+  }
+  if (r.bands && r.bands.length) lines.push(`📶 Bandas reportadas: ${escapeHtml(r.bands.join(', '))}`);
   if (r.provinces && r.provinces.length) lines.push(`📍 Provincias: ${escapeHtml(r.provinces.join(', '))}`);
   if (r.observations) {
     lines.push('');

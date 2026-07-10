@@ -1,6 +1,7 @@
 // tests/votes.unit.test.js — votos 👍/👎 por ficha (toggle + conteo)
 import { getVoteTallies, handleVoteCallback } from '../src/votes.js';
 import { showPhoneDetail } from '../src/search.js';
+import { cubaBandVerdict, normDeviceName } from '../src/format.js';
 import { SimpleTelegramBot } from '../src/bot-simple.js';
 import { fakeEnv, FakeD1, stubTelegramFetch } from './helpers/fakes.js';
 
@@ -78,5 +79,44 @@ describe('showPhoneDetail', () => {
     expect(kb).toContain('👍 2');
     expect(kb).toContain('👎 1');
     expect(kb).toContain('Volver');
+  });
+
+  test('incluye el veredicto de bandas (estimado) cuando hay match con B3', async () => {
+    const db = new FakeD1()
+      .when('FROM phones WHERE id', { first: { id: 7, commercial_name: 'Samsung Galaxy A57', model: 'SM-A576', works: null, bands: '[]', provinces: '[]', observations: '' } })
+      .when('FROM phone_votes WHERE phone_id', { all: [] })
+      .when('FROM device_bands WHERE norm_name = ', { first: { bands_4g: '1, 3, 7, 20', has_b3: 1 } });
+    const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
+    const tg = stubTelegramFetch();
+    await showPhoneDetail(bot, -100, 7, 0, 'galaxy a57');
+    const t = tg.find(c => c.method === 'sendMessage').payload.text;
+    expect(t).toContain('Compatible por bandas');
+    expect(t).toContain('LTE B3');
+    expect(t).toContain('NO probado');
+  });
+});
+
+describe('cubaBandVerdict', () => {
+  test('B3 presente -> compatible estimado', () => {
+    const v = cubaBandVerdict({ bands_4g: '1, 3, 7, 20', has_b3: 1 });
+    expect(v.ok).toBe(true);
+    expect(v.text).toContain('Compatible por bandas');
+    expect(v.text).toContain('NO probado');
+  });
+  test('sin B3 pero con LTE -> dudoso estimado', () => {
+    const v = cubaBandVerdict({ bands_4g: '2, 4, 5, 12', has_b3: 0 });
+    expect(v.ok).toBe(false);
+    expect(v.text).toContain('Dudoso');
+  });
+  test('sin números de banda o sin fila -> null (no estimamos)', () => {
+    expect(cubaBandVerdict({ bands_4g: 'LTE', has_b3: 0 })).toBeNull();
+    expect(cubaBandVerdict(null)).toBeNull();
+  });
+});
+
+describe('normDeviceName', () => {
+  test('normaliza para el cruce (minúsculas, sin símbolos, sin acentos)', () => {
+    expect(normDeviceName('Samsung Galaxy A02s')).toBe('samsung galaxy a02s');
+    expect(normDeviceName('Nothing Phone (4b) 5G')).toBe('nothing phone 4b 5g');
   });
 });

@@ -4,8 +4,25 @@
  * si no hay resultados o el índice falla, cae al LIKE por subcadena de siempre.
  */
 import { logger } from './logger.js';
-import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, formatPhoneDetail, escapeHtml } from './format.js';
+import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, formatPhoneDetail, normDeviceName, cubaBandVerdict, escapeHtml } from './format.js';
 import { getVoteTallies } from './votes.js';
+
+// Cruza el nombre del teléfono con device_bands (dataset GSMArena) para el
+// veredicto Cuba estimado. Devuelve {bands_4g, has_b3} o null. Best-effort:
+// si la tabla no existe / está vacía, no rompe la ficha.
+async function lookupBands(bot, commercialName) {
+  const nn = normDeviceName(commercialName);
+  if (!nn) return null;
+  try {
+    let row = await bot.db.prepare('SELECT bands_4g, has_b3 FROM device_bands WHERE norm_name = ?1 LIMIT 1').bind(nn).first();
+    if (!row) {
+      row = await bot.db.prepare('SELECT bands_4g, has_b3 FROM device_bands WHERE norm_name LIKE ?1 LIMIT 1').bind('%' + nn + '%').first();
+    }
+    return row || null;
+  } catch {
+    return null; // device_bands ausente todavía
+  }
+}
 
 const PAGE = 6;
 
@@ -118,7 +135,8 @@ export async function showPhoneDetail(bot, chatId, phoneId, offset, query, editM
     }
     const phone = parsePhoneRow(r);
     const tally = (await getVoteTallies(bot, [phoneId])).get(Number(phoneId)) || { up: 0, down: 0 };
-    const text = formatPhoneDetail(phone, tally);
+    const bandVerdict = cubaBandVerdict(await lookupBands(bot, phone.commercial_name));
+    const text = formatPhoneDetail(phone, tally, bandVerdict);
 
     const qShort = fitCallbackQuery(`vt:d:${phoneId}:${offset}:`, query);
     const kb = { inline_keyboard: [
