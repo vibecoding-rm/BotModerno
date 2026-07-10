@@ -16,6 +16,9 @@ export default [
         Blob: 'readonly',
         FormData: 'readonly',
         Request: 'readonly',
+        AbortController: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
       },
     },
     rules: {

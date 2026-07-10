@@ -28,6 +28,37 @@ export function luhnValidImei(imei) {
   return sum % 10 === 0;
 }
 
+// Fallback: consulta imeicheck.com (key personal, 60 req/min) cuando el TAC no
+// está en la base local. Devuelve {brand, model, aka} con la misma semántica que
+// la tabla tacs (brand=fabricante, model=nombre comercial, aka=código) o null.
+export async function fetchImeiFallback(key, imei) {
+  if (!key) return null;
+  const url = `https://alpha.imeicheck.com/api/free_with_key/modelBrandName?key=${encodeURIComponent(key)}&imei=${encodeURIComponent(imei)}&format=json`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'CubaModelBot/1.0' } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const o = data && data.object;
+    // status llega como "succes" (sic); nos basta con que haya marca en el objeto
+    if (!o || !o.brand) return null;
+    const brand = String(o.brand).trim();
+    const name = String(o.name || '').trim();   // nombre comercial
+    const code = String(o.model || '').trim();  // código del fabricante
+    if (!brand && !name && !code) return null;
+    return {
+      brand: brand || '—',
+      model: name || code || '—',
+      aka: name && code ? code : '',
+    };
+  } catch {
+    return null; // timeout / red / JSON inválido: /imei sigue con lo que tenga
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function handleImei(bot, chatId, argStr) {
   try {
     if (!argStr) {
@@ -48,7 +79,26 @@ export async function handleImei(bot, chatId, argStr) {
 
     const luhn = luhnValidImei(imei);
     const tac = imei.slice(0, 8);
-    const row = await bot.db.prepare('SELECT brand, model, aka FROM tacs WHERE tac = ?1').bind(tac).first();
+    let row = await bot.db.prepare('SELECT brand, model, aka FROM tacs WHERE tac = ?1').bind(tac).first();
+
+    // Fallback a imeicheck.com si el TAC no está local: identifica el equipo y
+    // cachea el resultado en tacs para no repetir la llamada (la base crece sola).
+    if (!row) {
+      const api = await fetchImeiFallback(bot.imeicheckKey, imei);
+      if (api) {
+        row = api;
+        try {
+          await bot.db.prepare(
+            'INSERT OR IGNORE INTO tacs (tac, brand, model, aka) VALUES (?1, ?2, ?3, ?4)'
+          ).bind(tac, api.brand, api.model, api.aka || null).run();
+        } catch { /* el cache es best-effort; no rompe la respuesta */ }
+        try {
+          await bot.db.prepare(
+            "INSERT INTO events (tg_id, type, payload, created_at) VALUES (NULL, 'tac_api', ?1, ?2)"
+          ).bind(tac, new Date().toISOString()).run();
+        } catch { /* solo telemetría */ }
+      }
+    }
 
     const lines = [];
     if (row) {

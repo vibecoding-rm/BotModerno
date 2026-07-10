@@ -26,6 +26,8 @@ export class SimpleTelegramBot {
     this.showShortWelcomeInGroup = String(env.SHOW_SHORT_WELCOME_IN_GROUP || 'true').toLowerCase() !== 'false';
     // Cloudflare KV (captcha/rate limit)
     this.kv = env.APP_KV;
+    // Key personal de imeicheck.com (fallback de /imei cuando el TAC no está local)
+    this.imeicheckKey = env.IMEICHECK_KEY;
   }
 
   // --- Telegram API helpers ---

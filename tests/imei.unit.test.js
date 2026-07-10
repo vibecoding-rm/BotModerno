@@ -1,7 +1,25 @@
 // tests/imei.unit.test.js — validación de IMEI y lookup de TAC
-import { normalizeImei, luhnValidImei, handleImei } from '../src/imei.js';
+import { normalizeImei, luhnValidImei, handleImei, fetchImeiFallback } from '../src/imei.js';
 import { SimpleTelegramBot } from '../src/bot-simple.js';
 import { fakeEnv, FakeD1, stubTelegramFetch } from './helpers/fakes.js';
+
+// Stub de fetch que responde con la forma de imeicheck.com para su endpoint y
+// delega el resto (Telegram) a la respuesta ok genérica.
+function stubWithImeicheck(object) {
+  const calls = [];
+  global.fetch = async (url, opts = {}) => {
+    if (String(url).includes('alpha.imeicheck.com')) {
+      calls.push({ url: String(url) });
+      return { ok: true, status: 200, async json() { return { status: 'succes', object }; } };
+    }
+    const method = String(url).split('/').pop();
+    let payload = null;
+    try { payload = JSON.parse(opts.body); } catch { payload = opts.body; }
+    calls.push({ method, payload });
+    return { ok: true, status: 200, async json() { return { ok: true, result: {} }; } };
+  };
+  return calls;
+}
 
 describe('normalizeImei', () => {
   test('acepta 15 dígitos con separadores', () => {
@@ -75,5 +93,51 @@ describe('handleImei', () => {
     await handleImei(bot, -100, '1234');
     const sent = tg.find(c => c.method === 'sendMessage');
     expect(sent.payload.text).toContain('no parece un IMEI');
+  });
+
+  test('TAC ausente local: usa fallback de imeicheck y cachea en tacs', async () => {
+    const calls = stubWithImeicheck({ brand: 'Motorola', name: 'Moto G22', model: 'XT2231-5' });
+    const db = new FakeD1()
+      .when('SELECT brand, model, aka FROM tacs', { first: null })
+      .when('phones_fts MATCH', { first: { n: 0 } });
+    const bot = new SimpleTelegramBot(fakeEnv({ DB: db, IMEICHECK_KEY: 'test-key' }));
+
+    await handleImei(bot, -100, '352322311421731');
+
+    const sent = calls.find(c => c.method === 'sendMessage');
+    expect(sent.payload.text).toContain('Motorola Moto G22');
+    expect(sent.payload.text).toContain('XT2231-5');
+    // se cacheó el TAC nuevo y se registró la telemetría
+    const cached = db.ran('INSERT OR IGNORE INTO tacs');
+    expect(cached).toHaveLength(1);
+    expect(cached[0].params).toEqual(['35232231', 'Motorola', 'Moto G22', 'XT2231-5']);
+    expect(db.ran("'tac_api'")).toHaveLength(1);
+  });
+
+  test('sin key configurada, el fallback no se intenta', async () => {
+    const db = new FakeD1().when('SELECT brand, model, aka FROM tacs', { first: null });
+    const bot = new SimpleTelegramBot(fakeEnv({ DB: db })); // sin IMEICHECK_KEY
+    await handleImei(bot, -100, '990000001234567');
+    const sent = tg.find(c => c.method === 'sendMessage');
+    expect(sent.payload.text).toContain('no está en nuestra base');
+    expect(db.ran('INSERT OR IGNORE INTO tacs')).toHaveLength(0);
+  });
+});
+
+describe('fetchImeiFallback', () => {
+  test('mapea brand/name/model a brand/model/aka', async () => {
+    stubWithImeicheck({ brand: 'Motorola', name: 'Moto G22', model: 'XT2231-5' });
+    const r = await fetchImeiFallback('k', '352322311421731');
+    expect(r).toEqual({ brand: 'Motorola', model: 'Moto G22', aka: 'XT2231-5' });
+  });
+  test('sin key devuelve null sin llamar a la red', async () => {
+    let called = false;
+    global.fetch = async () => { called = true; return { ok: true, async json() { return {}; } }; };
+    expect(await fetchImeiFallback('', '352322311421731')).toBeNull();
+    expect(called).toBe(false);
+  });
+  test('respuesta sin objeto devuelve null', async () => {
+    global.fetch = async () => ({ ok: true, status: 200, async json() { return { status: 'error' }; } });
+    expect(await fetchImeiFallback('k', '352322311421731')).toBeNull();
   });
 });
