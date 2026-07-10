@@ -4,7 +4,7 @@
  * si no hay resultados o el índice falla, cae al LIKE por subcadena de siempre.
  */
 import { logger } from './logger.js';
-import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, escapeHtml } from './format.js';
+import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, formatPhoneDetail, escapeHtml } from './format.js';
 import { getVoteTallies } from './votes.js';
 
 const PAGE = 6;
@@ -79,14 +79,11 @@ export async function searchByModel(bot, chatId, query, offset = 0, editMessageI
     const maxId = Math.max(0, ...matches.map(m => Number(m.id) || 0));
     const qShort = fitCallbackQuery(`vt:d:${maxId}:${offset}:`, query);
 
-    // Una fila de votos por ficha: [nombre] [👍 N] [👎 M]
+    // Un botón por ficha con el nombre COMPLETO: abre la vista de detalle (con votos)
     const rowsKb = matches.map(m => {
-      const name = (m.commercial_name || m.model || '').slice(0, 24) || 'Ficha';
-      return [
-        { text: `📱 ${name}`, callback_data: `vt:i:${m.id}` },
-        { text: `👍 ${m.up}`, callback_data: `vt:u:${m.id}:${offset}:${qShort}` },
-        { text: `👎 ${m.down}`, callback_data: `vt:d:${m.id}:${offset}:${qShort}` },
-      ];
+      const name = (m.commercial_name || m.model || 'Ficha').slice(0, 48);
+      const mark = m.works === true ? '✅' : (m.works === false ? '❌' : '❓');
+      return [{ text: `${mark} ${name}`, callback_data: `ph:${m.id}:${offset}:${qShort}` }];
     });
 
     // Fila de paginación
@@ -105,5 +102,40 @@ export async function searchByModel(bot, chatId, query, offset = 0, editMessageI
   } catch (e) {
     logger.error('searchByModel error', e, { chatId });
     await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
+  }
+}
+
+// Vista de detalle de un teléfono: nombre completo + datos + votos 👍/👎 + volver.
+// offset/query se conservan para poder regresar a la misma página de resultados.
+export async function showPhoneDetail(bot, chatId, phoneId, offset, query, editMessageId = null) {
+  try {
+    const r = await bot.db.prepare(
+      "SELECT id, commercial_name, model, works, bands, provinces, observations FROM phones WHERE id = ?1 AND status = 'approved'"
+    ).bind(phoneId).first();
+    if (!r) {
+      await bot.sendMessage(chatId, 'Esa ficha ya no está disponible.');
+      return;
+    }
+    const phone = parsePhoneRow(r);
+    const tally = (await getVoteTallies(bot, [phoneId])).get(Number(phoneId)) || { up: 0, down: 0 };
+    const text = formatPhoneDetail(phone, tally);
+
+    const qShort = fitCallbackQuery(`vt:d:${phoneId}:${offset}:`, query);
+    const kb = { inline_keyboard: [
+      [
+        { text: `👍 ${tally.up || 0}`, callback_data: `vt:u:${phoneId}:${offset}:${qShort}`, style: 'success' },
+        { text: `👎 ${tally.down || 0}`, callback_data: `vt:d:${phoneId}:${offset}:${qShort}`, style: 'danger' },
+      ],
+      [{ text: '⬅ Volver a los resultados', callback_data: `pg:${offset}:${qShort}` }],
+    ] };
+
+    if (editMessageId) {
+      await bot.editMessageText(chatId, editMessageId, text, { reply_markup: kb, parse_mode: 'HTML' });
+    } else {
+      await bot.sendMessage(chatId, text, { reply_markup: kb, parse_mode: 'HTML' });
+    }
+  } catch (e) {
+    logger.error('showPhoneDetail error', e, { chatId });
+    await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo.');
   }
 }

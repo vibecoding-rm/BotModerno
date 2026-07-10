@@ -1,5 +1,6 @@
 // tests/votes.unit.test.js — votos 👍/👎 por ficha (toggle + conteo)
 import { getVoteTallies, handleVoteCallback } from '../src/votes.js';
+import { showPhoneDetail } from '../src/search.js';
 import { SimpleTelegramBot } from '../src/bot-simple.js';
 import { fakeEnv, FakeD1, stubTelegramFetch } from './helpers/fakes.js';
 
@@ -53,12 +54,29 @@ describe('handleVoteCallback', () => {
     expect(db.ran('DELETE FROM phone_votes')).toHaveLength(0);
   });
 
-  test('la etiqueta (vt:i) solo muestra ayuda, no vota', async () => {
+  test('dirección desconocida no vota', async () => {
     const db = new FakeD1();
     const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
-    await handleVoteCallback(bot, { ...base, data: 'vt:i:5' });
+    await handleVoteCallback(bot, { ...base, data: 'vt:x:5:0:samsung' });
     expect(db.ran('phone_votes')).toHaveLength(0);
-    const ans = tg.find(c => c.method === 'answerCallbackQuery');
-    expect(ans.payload.text).toContain('experiencia');
+    expect(tg.find(c => c.method === 'answerCallbackQuery')).toBeTruthy();
+  });
+});
+
+describe('showPhoneDetail', () => {
+  test('muestra el nombre completo, conteo y botones de voto + volver', async () => {
+    const db = new FakeD1()
+      .when('FROM phones WHERE id', { first: { id: 5, commercial_name: 'Samsung Galaxy A02s', model: 'SM-A025M', works: 1, bands: '[]', provinces: '[]', observations: 'Anda de lujo' } })
+      .when('FROM phone_votes WHERE phone_id', { all: [{ phone_id: 5, up: 2, down: 1 }] });
+    const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
+    const tg = stubTelegramFetch();
+    await showPhoneDetail(bot, -100, 5, 0, 'samsung');
+    const sent = tg.find(c => c.method === 'sendMessage');
+    expect(sent.payload.text).toContain('Samsung Galaxy A02s');
+    expect(sent.payload.text).toContain('Funciona en Cuba');
+    const kb = JSON.stringify(sent.payload.reply_markup.inline_keyboard);
+    expect(kb).toContain('👍 2');
+    expect(kb).toContain('👎 1');
+    expect(kb).toContain('Volver');
   });
 });

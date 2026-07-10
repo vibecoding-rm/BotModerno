@@ -26,21 +26,20 @@ export async function getVoteTallies(bot, ids) {
   return map;
 }
 
-// Registra/cambia/quita un voto y devuelve un mensaje corto para el toast.
+// Registra/cambia/quita un voto y re-renderiza la ficha con el conteo al día.
 // data: "vt:<u|d>:<phoneId>:<offset>:<query>"
 export async function handleVoteCallback(bot, { id, data, msg, chatId, userId }) {
   const parts = data.split(':');
-  const dir = parts[1];                 // 'u' | 'd' | 'i' (etiqueta, no vota)
+  const dir = parts[1];                 // 'u' (👍) | 'd' (👎)
   const phoneId = Number(parts[2]) || 0;
-
-  if (dir === 'i') {
-    await bot.answerCallbackQuery(id, { text: '👍 funcionó · 👎 no funcionó — según tu experiencia' });
+  const vote = dir === 'u' ? 1 : dir === 'd' ? -1 : 0;
+  if (!vote) {                          // dirección desconocida: no hacemos nada
+    await bot.answerCallbackQuery(id);
     return;
   }
 
   const offset = Number(parts[3]) || 0;
   const query = parts.slice(4).join(':');
-  const vote = dir === 'u' ? 1 : -1;
 
   let toast = '¡Gracias por tu voto!';
   try {
@@ -67,9 +66,7 @@ export async function handleVoteCallback(bot, { id, data, msg, chatId, userId })
   }
 
   await bot.answerCallbackQuery(id, { text: toast });
-  // Re-render de la misma página para actualizar los conteos
-  if (query) {
-    const { searchByModel } = await import('./search.js');
-    await searchByModel(bot, chatId, query, offset, msg?.message_id);
-  }
+  // Re-render de la ficha (vista de detalle) con el conteo actualizado
+  const { showPhoneDetail } = await import('./search.js');
+  await showPhoneDetail(bot, chatId, phoneId, offset, query, msg?.message_id);
 }

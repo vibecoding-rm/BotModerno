@@ -89,6 +89,29 @@ export function escapeHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Ficha individual de un teléfono (vista de detalle con votos). Nombre completo,
+// sin truncar, con todo el ancho. r ya viene de parsePhoneRow; tally = {up, down}.
+export function formatPhoneDetail(r, tally = { up: 0, down: 0 }) {
+  const w = r.works === true ? '✅ Funciona en Cuba'
+    : (r.works === false ? '❌ No funciona en Cuba' : '❓ Compatibilidad sin confirmar');
+  const lines = [`📱 <b>${escapeHtml(r.commercial_name)}</b>`];
+  const showModel = r.model && r.model.toUpperCase() !== (r.commercial_name || '').trim().toUpperCase();
+  if (showModel) lines.push(`🔩 Modelo: <code>${escapeHtml(r.model)}</code>`);
+  lines.push('');
+  lines.push(w);
+  if (r.bands && r.bands.length) lines.push(`📶 Bandas: ${escapeHtml(r.bands.join(', '))}`);
+  if (r.provinces && r.provinces.length) lines.push(`📍 Provincias: ${escapeHtml(r.provinces.join(', '))}`);
+  if (r.observations) {
+    lines.push('');
+    lines.push(`💬 ${escapeHtml(r.observations)}`);
+  }
+  const up = tally.up || 0, down = tally.down || 0;
+  lines.push('');
+  lines.push('──────────────');
+  lines.push(`👍 ${up} · 👎 ${down} — ¿te sirvió esta info? Vota abajo 👇`);
+  return lines.join('\n');
+}
+
 // Página de resultados de /revisar: compacto, nombre en negrita, solo campos con datos (HTML)
 export function formatSearchResults(query, matches, offset, total) {
   const from = offset + 1;

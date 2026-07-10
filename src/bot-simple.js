@@ -10,7 +10,7 @@ import { logger } from './logger.js';
 import { tgFetch } from './telegram.js';
 import { toCsvArray, escapeHtml } from './format.js';
 import { onCommand } from './commands.js';
-import { searchByModel } from './search.js';
+import { searchByModel, showPhoneDetail } from './search.js';
 import { handleWizardText, handleWizardCallback, handleProvincesCallback } from './wizard.js';
 import { handleModCallback, drainPendingNotifications } from './moderation.js';
 import { handleExportCallback } from './export.js';
@@ -276,7 +276,18 @@ export class SimpleTelegramBot {
         return;
       }
 
-      // Votos 👍/👎 por ficha (cualquiera puede votar en el grupo)
+      // Abrir la ficha de detalle de un teléfono desde los resultados
+      if (data.startsWith('ph:')) {
+        await this.answerCallbackQuery(id);
+        const parts = data.split(':');
+        const phoneId = Number(parts[1]) || 0;
+        const offset = Number(parts[2]) || 0;
+        const query = parts.slice(3).join(':');
+        await showPhoneDetail(this, chatId, phoneId, offset, query, msg?.message_id);
+        return;
+      }
+
+      // Votos 👍/👎 en la ficha (cualquiera puede votar en el grupo)
       if (data.startsWith('vt:')) {
         await handleVoteCallback(this, { id, data, msg, chatId, userId });
         return;
