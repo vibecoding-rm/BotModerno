@@ -73,7 +73,8 @@ describe('handleImei', () => {
     await handleImei(bot, -100, '490139201234563');
     const sent = tg.find(c => c.method === 'sendMessage');
     expect(sent.payload.text).toContain('Compatible con el 4G de Cuba');
-    expect(sent.payload.text).toContain('NO probado');
+    expect(sent.payload.text).toContain('B3 (1800 MHz)');
+    expect(sent.payload.text).toContain('NO lo ha probado');
   });
 
   test('TAC desconocido lo dice y sugiere /revisar', async () => {

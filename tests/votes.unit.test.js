@@ -93,8 +93,8 @@ describe('showPhoneDetail', () => {
     await showPhoneDetail(bot, -100, 7, 0, 'galaxy a57');
     const t = tg.find(c => c.method === 'sendMessage').payload.text;
     expect(t).toContain('Compatible con el 4G de Cuba');
-    expect(t).toContain('LTE B3');
-    expect(t).toContain('NO probado');
+    expect(t).toContain('B3 (1800 MHz)');
+    expect(t).toContain('NO lo ha probado');
   });
 });
 
@@ -115,18 +115,21 @@ describe('/revisar fallback a bandas (modelo no testeado)', () => {
 });
 
 describe('cubaBandVerdict', () => {
-  test('B3 presente -> compatible', () => {
+  test('B3 presente -> compatible (con frecuencia explícita)', () => {
     const v = cubaBandVerdict({ bands_4g: '1, 3, 7, 20' });
     expect(v.level).toBe('ok');
     expect(v.text).toContain('Compatible con el 4G de Cuba');
-    expect(v.text).toContain('LTE B3');
-    expect(v.text).toContain('NO probado');
+    expect(v.text).toContain('B3 (1800 MHz)');
+    expect(v.text).toContain('NO lo ha probado');
+    expect(v.short).toContain('1800 MHz');
   });
-  test('sin B3 pero con B1/B28 -> 4G parcial', () => {
+  test('sin B3 pero con B1/B28 -> 4G limitado, nombra las frecuencias', () => {
     const v = cubaBandVerdict({ bands_4g: '1, 2, 4, 28' });
     expect(v.level).toBe('partial');
-    expect(v.text).toContain('parcial');
-    expect(v.short).toContain('B1/B28');
+    expect(v.text).toContain('limitado');
+    expect(v.text).toContain('B1 (2100 MHz)');
+    expect(v.text).toContain('B28 (700 MHz)');
+    expect(v.short).toContain('sin B3');
   });
   test('LTE sin ninguna banda de ETECSA -> sin 4G', () => {
     const v = cubaBandVerdict({ bands_4g: '2, 4, 5, 12', bands_2g: 'GSM 900' });
