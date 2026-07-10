@@ -128,46 +128,41 @@ export function cubaBandVerdict(bandRow) {
 
   if (!has4gBands && !mentionsLte && !has3G && !has2G) return null; // nada que estimar
 
-  const disclaimer = '⚠️ <i>Estimado por las bandas del equipo — NO lo ha probado la comunidad.</i>';
+  const disclaimer = '⚠️ <i>Es un cálculo por las specs del equipo, NO lo ha probado nadie en Cuba.</i>';
+  const g4 = b3 ? 'full' : (b1 || b28) ? 'partial' : has4gBands ? 'no' : mentionsLte ? 'unknown' : 'no';
+  const calls = has3G || has2G;
 
-  // Línea 4G + nivel/headline
-  let l4, level, ok = false;
-  if (b3) {
-    l4 = '• <b>4G: ✅ sí</b> — banda B3 (1800 MHz), la principal de ETECSA' + (sec ? `, y también ${sec}` : '');
-    level = 'ok'; ok = true;
-  } else if (b1 || b28) {
-    l4 = `• <b>4G: 🟡 parcial</b> — trae ${sec}, pero NO la B3 (1800 MHz); solo habría 4G donde ETECSA las use`;
-    level = 'partial';
-  } else if (has4gBands) {
-    l4 = '• <b>4G: ❌ no</b> — no trae ninguna banda de ETECSA (B3/1800, B1/2100 ni B28/700)';
-    level = 'none';
-  } else if (mentionsLte) {
-    l4 = '• <b>4G: ⚠️ tiene LTE</b>, pero no sabemos sus bandas para confirmar la B3 (1800 MHz)';
-    level = 'unknown';
-  } else {
-    l4 = '• <b>4G: ❌ no</b> — el equipo no tiene 4G/LTE';
-    level = 'none';
-  }
+  // Línea de internet 4G: dice claro SÍ / NO / a medias y por qué
+  let l4;
+  if (g4 === 'full') l4 = '✅ <b>Internet 4G: SÍ.</b> Trae la banda B3 (1800 MHz), la que usa ETECSA para el 4G en toda Cuba' + (sec ? `, y también ${sec}` : '') + '.';
+  else if (g4 === 'partial') l4 = `🟡 <b>Internet 4G: solo en algunas zonas.</b> No trae la B3 (1800 MHz), la principal de ETECSA; trae ${sec}, que solo hay en pocos lugares.`;
+  else if (g4 === 'unknown') l4 = '⚠️ <b>Internet 4G: no seguro.</b> El equipo tiene LTE, pero no sabemos si trae la banda B3 (1800 MHz) que usa ETECSA.';
+  else l4 = '❌ <b>Internet 4G: NO.</b> No trae la banda B3 (1800 MHz) que usa ETECSA para el 4G.';
 
-  const l3 = has3G
-    ? `• <b>3G: ✅ sí</b> — ${cuba3g.join(' y ')} (llamadas y datos)`
-    : '• <b>3G: ❌</b> — no trae las de ETECSA (900 / 2100 MHz)';
-  const l2 = has2G
-    ? '• <b>2G: ✅ sí</b> — 900 MHz (llamadas y SMS)'
-    : '• <b>2G: ❌</b> — no trae 900 MHz';
+  // Línea de llamadas / internet básico (2G y 3G)
+  const cbits = [];
+  if (has3G) cbits.push(`3G (${cuba3g.join(' / ')})`);
+  if (has2G) cbits.push('2G (900 MHz)');
+  const l23 = calls
+    ? `✅ <b>Llamadas, SMS e internet básico: SÍ.</b> Soporta ${cbits.join(' y ')}.`
+    : '❌ <b>Llamadas: NO.</b> No trae el 2G (900 MHz) ni el 3G de ETECSA.';
 
-  const text = ['📶 <b>Compatibilidad con Cuba</b> (estimado):', l4, l3, l2, disclaimer].join('\n');
+  const text = ['📶 <b>¿Funcionaría en Cuba?</b> (estimado por sus bandas)', '', l4, l23, '', disclaimer].join('\n');
 
-  // Resumen corto para la lista: qué generaciones sirven
-  const gens = [];
-  if (b3) gens.push('4G (B3/1800)');
-  else if (b1 || b28) gens.push('4G parcial');
-  else if (mentionsLte) gens.push('4G¿?');
-  if (has3G) gens.push('3G');
-  if (has2G) gens.push('2G');
-  const short = gens.length ? '📶 ' + gens.join(' · ') : '📵 sin bandas de Cuba';
+  // Titular corto para la lista: la respuesta primero
+  let head;
+  if (g4 === 'full') head = '✅ Sí sirve';
+  else if (g4 === 'partial') head = '🟡 Sirve a medias (4G solo en zonas)';
+  else if (g4 === 'unknown') head = '⚠️ Quizás (4G no confirmado)';
+  else if (calls) head = '🟡 Solo llamadas y 3G (sin 4G)';
+  else head = '❌ No sirve en Cuba';
+  const got = [];
+  if (g4 === 'full') got.push('4G'); else if (g4 === 'partial') got.push('4G parcial');
+  if (has3G) got.push('3G');
+  if (has2G) got.push('2G');
+  const short = got.length ? `${head} — tiene ${got.join(', ')}` : head;
 
-  return { ok, level, short, text };
+  return { ok: g4 === 'full', level: g4 === 'full' ? 'ok' : g4 === 'partial' ? 'partial' : 'none', short, text };
 }
 
 // Lista de estimados por bandas para modelos que la comunidad NO ha reportado

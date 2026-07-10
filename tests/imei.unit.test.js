@@ -68,12 +68,12 @@ describe('handleImei', () => {
     const db = new FakeD1()
       .when('SELECT brand, model, aka FROM tacs', { first: { brand: 'Samsung', model: 'Galaxy A57', aka: '' } })
       .when('phones_fts MATCH', { first: { n: 0 } })
-      .when('FROM device_bands WHERE norm_name = ', { first: { bands_4g: '1, 3, 7, 20' } });
+      .when('FROM device_bands WHERE norm_name = ', { first: { bands_4g: '1, 3, 7, 20', bands_3g: 'HSDPA 900 / 2100', bands_2g: 'GSM 900' } });
     const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
     await handleImei(bot, -100, '490139201234563');
     const sent = tg.find(c => c.method === 'sendMessage');
-    expect(sent.payload.text).toContain('Compatibilidad con Cuba');
-    expect(sent.payload.text).toContain('4G: ✅');
+    expect(sent.payload.text).toContain('¿Funcionaría en Cuba?');
+    expect(sent.payload.text).toContain('Internet 4G: SÍ');
     expect(sent.payload.text).toContain('B3 (1800 MHz)');
     expect(sent.payload.text).toContain('NO lo ha probado');
   });
