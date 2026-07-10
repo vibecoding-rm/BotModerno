@@ -168,17 +168,25 @@ export function cubaBandVerdict(bandRow) {
 // Lista de estimados por bandas para modelos que la comunidad NO ha reportado
 // (fallback de /revisar cruzando con device_bands). rows: filas de device_bands.
 export function formatBandEstimates(query, rows) {
+  // Un solo modelo: desglose COMPLETO, idéntico al de /imei (coherencia).
+  if (rows.length === 1) {
+    const r = rows[0];
+    const v = cubaBandVerdict(r);
+    const name = `${r.oem || ''} ${r.model || ''}`.trim();
+    return `🔎 Nadie de la comunidad ha reportado el «${escapeHtml(name)}» todavía.\n\n`
+      + (v ? v.text : 'No tengo datos de bandas de este equipo.')
+      + '\n\n📲 ¿Lo tienes en la mano? Confírmalo con /subir para que quede probado.';
+  }
+  // Varios: lista con el titular corto de cada uno.
   const blocks = rows.map(r => {
     const v = cubaBandVerdict(r);
     const name = `${r.oem || ''} ${r.model || ''}`.trim();
-    let line = `📱 <b>${escapeHtml(name)}</b>`;
-    if (v) line += `\n    ${v.short}`;
-    return line;
+    return `📱 <b>${escapeHtml(name)}</b>` + (v ? `\n    ${v.short}` : '');
   });
   return `🔎 Nadie de la comunidad ha reportado «${escapeHtml(query)}» todavía.\n\n` +
-    '📊 <b>Estimado por las bandas del equipo</b> (no es un teléfono probado en Cuba):\n\n' +
+    '📊 <b>Estimado por las bandas</b> (no es un teléfono probado en Cuba):\n\n' +
     blocks.join('\n\n') +
-    '\n\n⚠️ Es un cálculo por las specs del modelo. ¿Lo tienes en la mano? Confírmalo con /subir.';
+    '\n\n⚠️ Es un cálculo por las specs. Busca el modelo exacto para ver el detalle, y /subir para confirmarlo.';
 }
 
 // Ficha individual de un teléfono (vista de detalle con votos). Nombre completo,

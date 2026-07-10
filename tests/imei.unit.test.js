@@ -64,10 +64,10 @@ describe('handleImei', () => {
     expect(sent.payload.text).toContain('49013920');
   });
 
-  test('TAC conocido añade el estimado por bandas si hay match', async () => {
+  test('TAC sin confirmar en la comunidad añade el estimado por bandas', async () => {
     const db = new FakeD1()
       .when('SELECT brand, model, aka FROM tacs', { first: { brand: 'Samsung', model: 'Galaxy A57', aka: '' } })
-      .when('phones_fts MATCH', { first: { n: 0 } })
+      .when('phones_fts MATCH', { first: { n: 0, yes: 0, no: 0 } })
       .when('FROM device_bands WHERE norm_name = ', { first: { bands_4g: '1, 3, 7, 20', bands_3g: 'HSDPA 900 / 2100', bands_2g: 'GSM 900' } });
     const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
     await handleImei(bot, -100, '490139201234563');
@@ -75,7 +75,18 @@ describe('handleImei', () => {
     expect(sent.payload.text).toContain('¿Funcionaría en Cuba?');
     expect(sent.payload.text).toContain('Internet 4G: SÍ');
     expect(sent.payload.text).toContain('B3 (1800 MHz)');
-    expect(sent.payload.text).toContain('NO lo ha probado');
+  });
+
+  test('probado manda: si la comunidad confirmó, /imei no muestra el estimado', async () => {
+    const db = new FakeD1()
+      .when('SELECT brand, model, aka FROM tacs', { first: { brand: 'Samsung', model: 'Galaxy A57', aka: '' } })
+      .when('phones_fts MATCH', { first: { n: 3, yes: 2, no: 0 } })
+      .when('FROM device_bands WHERE norm_name = ', { first: { bands_4g: '1, 3, 7, 20' } });
+    const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
+    await handleImei(bot, -100, '490139201234563');
+    const t = tg.find(c => c.method === 'sendMessage').payload.text;
+    expect(t).toContain('La comunidad confirma que funciona');
+    expect(t).not.toContain('¿Funcionaría en Cuba?'); // no se muestra el estimado
   });
 
   test('TAC desconocido lo dice y sugiere /revisar', async () => {

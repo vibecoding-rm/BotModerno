@@ -107,33 +107,43 @@ export async function handleImei(bot, chatId, argStr) {
       if (row.aka) lines.push(`    🏷 También conocido como: ${escapeHtml(row.aka)}`);
       lines.push(`    🔢 TAC: <code>${tac}</code>`);
 
-      // Cruce con la base comunitaria (mismo buscador FTS de /revisar)
+      // Cruce con la base comunitaria (mismo buscador FTS de /revisar), leyendo
+      // el consenso de works para respetar "probado manda".
       const match = buildFtsQuery(`${row.brand} ${row.model}`);
-      let known = 0;
+      let comm = { n: 0, yes: 0, no: 0 };
       if (match) {
         try {
           const c = await bot.db.prepare(
-            "SELECT COUNT(*) AS n FROM phones_fts f JOIN phones p ON p.id = f.rowid WHERE phones_fts MATCH ?1 AND p.status = 'approved'"
+            "SELECT COUNT(*) AS n, SUM(CASE WHEN p.works = 1 THEN 1 ELSE 0 END) AS yes, SUM(CASE WHEN p.works = 0 THEN 1 ELSE 0 END) AS no FROM phones_fts f JOIN phones p ON p.id = f.rowid WHERE phones_fts MATCH ?1 AND p.status = 'approved'"
           ).bind(match).first();
-          known = c?.n || 0;
+          comm = { n: c?.n || 0, yes: c?.yes || 0, no: c?.no || 0 };
         } catch { /* índice FTS ausente: se omite el cruce */ }
       }
-      if (known > 0) {
-        lines.push('');
-        lines.push(`📚 La comunidad tiene <b>${known}</b> registro${known === 1 ? '' : 's'} de este modelo:`);
+      const confirmed = comm.yes > 0 || comm.no > 0;
+
+      lines.push('');
+      if (comm.yes > 0) {
+        lines.push(`✅ <b>La comunidad confirma que funciona en Cuba</b> (${comm.yes} reporte${comm.yes === 1 ? '' : 's'}).`);
+        lines.push(`👉 Míralo en /revisar ${escapeHtml(row.model)}`);
+      } else if (comm.no > 0) {
+        lines.push('❌ <b>La comunidad reporta que NO funciona en Cuba.</b>');
+        lines.push(`👉 Míralo en /revisar ${escapeHtml(row.model)}`);
+      } else if (comm.n > 0) {
+        lines.push(`📚 La comunidad tiene <b>${comm.n}</b> registro${comm.n === 1 ? '' : 's'} de este modelo (sin confirmar aún).`);
         lines.push(`👉 /revisar ${escapeHtml(row.model)}`);
       } else {
-        lines.push('');
         lines.push('🔎 Aún no hay experiencia de la comunidad con este modelo.');
         lines.push('📲 ¿Lo probaste en Cuba? Aporta con /subir.');
       }
 
-      // Estimado por bandas del modelo (device_bands): útil sobre todo cuando la
-      // comunidad aún no lo ha reportado. Best-effort.
-      const bandVerdict = cubaBandVerdict(await lookupBands(bot, `${row.brand} ${row.model}`));
-      if (bandVerdict) {
-        lines.push('');
-        lines.push(bandVerdict.text);
+      // Estimado por bandas SOLO si la comunidad no lo ha confirmado (probado manda),
+      // igual que la ficha de /revisar. Best-effort.
+      if (!confirmed) {
+        const bandVerdict = cubaBandVerdict(await lookupBands(bot, `${row.brand} ${row.model}`));
+        if (bandVerdict) {
+          lines.push('');
+          lines.push(bandVerdict.text);
+        }
       }
     } else {
       // Registrar el TAC no encontrado: sirve para curar la base con datos reales de uso

@@ -111,7 +111,9 @@ describe('/revisar fallback a bandas (modelo no testeado)', () => {
     const t = tg.find(c => c.method === 'sendMessage').payload.text;
     expect(t).toContain('Nadie de la comunidad ha reportado');
     expect(t).toContain('Galaxy A54');
-    expect(t).toContain('Estimado por las bandas');
+    // un solo modelo -> desglose completo, igual que /imei
+    expect(t).toContain('¿Funcionaría en Cuba?');
+    expect(t).toContain('Internet 4G: SÍ');
   });
 });
 
