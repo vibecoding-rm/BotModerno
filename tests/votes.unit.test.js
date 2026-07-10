@@ -92,7 +92,8 @@ describe('showPhoneDetail', () => {
     const tg = stubTelegramFetch();
     await showPhoneDetail(bot, -100, 7, 0, 'galaxy a57');
     const t = tg.find(c => c.method === 'sendMessage').payload.text;
-    expect(t).toContain('Compatible con el 4G de Cuba');
+    expect(t).toContain('Compatibilidad con Cuba');
+    expect(t).toContain('4G: ✅');
     expect(t).toContain('B3 (1800 MHz)');
     expect(t).toContain('NO lo ha probado');
   });
@@ -115,30 +116,40 @@ describe('/revisar fallback a bandas (modelo no testeado)', () => {
 });
 
 describe('cubaBandVerdict', () => {
-  test('B3 presente -> compatible (con frecuencia explícita)', () => {
-    const v = cubaBandVerdict({ bands_4g: '1, 3, 7, 20' });
+  test('desglose 4G/3G/2G con B3 y frecuencias', () => {
+    const v = cubaBandVerdict({ bands_4g: '1, 3, 7, 20', bands_3g: 'HSDPA 900 / 2100', bands_2g: 'GSM 900' });
     expect(v.level).toBe('ok');
-    expect(v.text).toContain('Compatible con el 4G de Cuba');
+    expect(v.text).toContain('4G: ✅');
     expect(v.text).toContain('B3 (1800 MHz)');
+    expect(v.text).toContain('3G: ✅');
+    expect(v.text).toContain('2G: ✅');
     expect(v.text).toContain('NO lo ha probado');
-    expect(v.short).toContain('1800 MHz');
+    expect(v.short).toContain('4G (B3/1800)');
+    expect(v.short).toContain('3G');
+    expect(v.short).toContain('2G');
   });
-  test('sin B3 pero con B1/B28 -> 4G limitado, nombra las frecuencias', () => {
+  test('sin B3 pero con B1/B28 -> 4G parcial, nombra las frecuencias', () => {
     const v = cubaBandVerdict({ bands_4g: '1, 2, 4, 28' });
     expect(v.level).toBe('partial');
-    expect(v.text).toContain('limitado');
+    expect(v.text).toContain('4G: 🟡 parcial');
     expect(v.text).toContain('B1 (2100 MHz)');
     expect(v.text).toContain('B28 (700 MHz)');
-    expect(v.short).toContain('sin B3');
+    expect(v.short).toContain('4G parcial');
   });
-  test('LTE sin ninguna banda de ETECSA -> sin 4G', () => {
-    const v = cubaBandVerdict({ bands_4g: '2, 4, 5, 12', bands_2g: 'GSM 900' });
+  test('4G no compatible pero con 2G/3G lo indica', () => {
+    const v = cubaBandVerdict({ bands_4g: '2, 4, 5, 12', bands_3g: 'HSDPA 850 / 1900 / 2100', bands_2g: 'GSM 850 / 900' });
     expect(v.level).toBe('none');
-    expect(v.text).toContain('sin 4G');
-    expect(v.text).toContain('llamadas'); // tiene GSM 900
+    expect(v.text).toContain('4G: ❌');
+    expect(v.text).toContain('3G: ✅'); // tiene 2100
+    expect(v.text).toContain('2G: ✅'); // tiene 900
   });
-  test('sin números de banda o sin fila -> null (no estimamos)', () => {
-    expect(cubaBandVerdict({ bands_4g: 'LTE' })).toBeNull();
+  test('solo 2G/3G (sin 4G) igual da veredicto', () => {
+    const v = cubaBandVerdict({ bands_4g: 'No', bands_3g: 'UMTS 2100', bands_2g: 'GSM 900' });
+    expect(v.text).toContain('4G: ❌');
+    expect(v.short).toContain('3G');
+  });
+  test('sin nada que evaluar o sin fila -> null', () => {
+    expect(cubaBandVerdict({ bands_4g: '', bands_3g: '', bands_2g: '' })).toBeNull();
     expect(cubaBandVerdict(null)).toBeNull();
   });
 });

@@ -72,7 +72,8 @@ describe('handleImei', () => {
     const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
     await handleImei(bot, -100, '490139201234563');
     const sent = tg.find(c => c.method === 'sendMessage');
-    expect(sent.payload.text).toContain('Compatible con el 4G de Cuba');
+    expect(sent.payload.text).toContain('Compatibilidad con Cuba');
+    expect(sent.payload.text).toContain('4G: ✅');
     expect(sent.payload.text).toContain('B3 (1800 MHz)');
     expect(sent.payload.text).toContain('NO lo ha probado');
   });
