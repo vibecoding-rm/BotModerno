@@ -4,23 +4,41 @@
  * si no hay resultados o el índice falla, cae al LIKE por subcadena de siempre.
  */
 import { logger } from './logger.js';
-import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, formatPhoneDetail, normDeviceName, cubaBandVerdict, escapeHtml } from './format.js';
+import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, formatPhoneDetail, formatBandEstimates, normDeviceName, cubaBandVerdict, escapeHtml } from './format.js';
 import { getVoteTallies } from './votes.js';
 
 // Cruza el nombre del teléfono con device_bands (dataset GSMArena) para el
-// veredicto Cuba estimado. Devuelve {bands_4g, has_b3} o null. Best-effort:
-// si la tabla no existe / está vacía, no rompe la ficha.
-async function lookupBands(bot, commercialName) {
-  const nn = normDeviceName(commercialName);
+// veredicto Cuba estimado. Devuelve {bands_2g, bands_3g, bands_4g} o null.
+// Best-effort: si la tabla no existe / está vacía, no rompe nada.
+export async function lookupBands(bot, name) {
+  const nn = normDeviceName(name);
   if (!nn) return null;
   try {
-    let row = await bot.db.prepare('SELECT bands_4g, has_b3 FROM device_bands WHERE norm_name = ?1 LIMIT 1').bind(nn).first();
+    let row = await bot.db.prepare('SELECT bands_2g, bands_3g, bands_4g FROM device_bands WHERE norm_name = ?1 LIMIT 1').bind(nn).first();
     if (!row) {
-      row = await bot.db.prepare('SELECT bands_4g, has_b3 FROM device_bands WHERE norm_name LIKE ?1 LIMIT 1').bind('%' + nn + '%').first();
+      row = await bot.db.prepare('SELECT bands_2g, bands_3g, bands_4g FROM device_bands WHERE norm_name LIKE ?1 LIMIT 1').bind('%' + nn + '%').first();
     }
     return row || null;
   } catch {
     return null; // device_bands ausente todavía
+  }
+}
+
+// Fallback de /revisar: cuando la comunidad no tiene el modelo, busca en
+// device_bands y muestra el estimado por bandas. Devuelve true si mostró algo.
+async function bandsFallback(bot, chatId, query) {
+  const nn = normDeviceName(query);
+  if (!nn) return false;
+  try {
+    const res = await bot.db.prepare(
+      'SELECT oem, model, bands_2g, bands_3g, bands_4g FROM device_bands WHERE norm_name LIKE ?1 GROUP BY norm_name ORDER BY LENGTH(norm_name) LIMIT 6'
+    ).bind('%' + nn + '%').all();
+    const rows = res.results || [];
+    if (!rows.length) return false;
+    await bot.sendMessage(chatId, formatBandEstimates(query, rows));
+    return true;
+  } catch {
+    return false; // device_bands ausente todavía
   }
 }
 
@@ -73,10 +91,14 @@ export async function searchByModel(bot, chatId, query, offset = 0, editMessageI
     const { total, rows } = found;
 
     if (!total) {
-      await bot.sendMessage(chatId,
-        `🔎 No encontramos nada para «${escapeHtml(query)}».\n\n` +
-        '💡 Prueba con menos letras (solo la marca o el código del modelo).\n' +
-        '📲 ¿Lo tienes en la mano? Proponlo con /subir y ayuda a la comunidad.');
+      // Sin reporte de la comunidad: intentar el estimado por bandas (device_bands)
+      const shown = await bandsFallback(bot, chatId, query);
+      if (!shown) {
+        await bot.sendMessage(chatId,
+          `🔎 No encontramos nada para «${escapeHtml(query)}».\n\n` +
+          '💡 Prueba con menos letras (solo la marca o el código del modelo).\n' +
+          '📲 ¿Lo tienes en la mano? Proponlo con /subir y ayuda a la comunidad.');
+      }
       return;
     }
 
@@ -135,7 +157,12 @@ export async function showPhoneDetail(bot, chatId, phoneId, offset, query, editM
     }
     const phone = parsePhoneRow(r);
     const tally = (await getVoteTallies(bot, [phoneId])).get(Number(phoneId)) || { up: 0, down: 0 };
-    const bandVerdict = cubaBandVerdict(await lookupBands(bot, phone.commercial_name));
+    // Si la comunidad ya confirmó/negó (works true/false), eso manda y no
+    // mostramos el estimado por bandas para no contradecir. Solo estimamos
+    // cuando la compatibilidad está sin confirmar (works === null).
+    const bandVerdict = phone.works === null
+      ? cubaBandVerdict(await lookupBands(bot, phone.commercial_name))
+      : null;
     const text = formatPhoneDetail(phone, tally, bandVerdict);
 
     const qShort = fitCallbackQuery(`vt:d:${phoneId}:${offset}:`, query);

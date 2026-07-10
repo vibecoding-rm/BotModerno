@@ -64,6 +64,18 @@ describe('handleImei', () => {
     expect(sent.payload.text).toContain('49013920');
   });
 
+  test('TAC conocido añade el estimado por bandas si hay match', async () => {
+    const db = new FakeD1()
+      .when('SELECT brand, model, aka FROM tacs', { first: { brand: 'Samsung', model: 'Galaxy A57', aka: '' } })
+      .when('phones_fts MATCH', { first: { n: 0 } })
+      .when('FROM device_bands WHERE norm_name = ', { first: { bands_4g: '1, 3, 7, 20' } });
+    const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));
+    await handleImei(bot, -100, '490139201234563');
+    const sent = tg.find(c => c.method === 'sendMessage');
+    expect(sent.payload.text).toContain('Compatible con el 4G de Cuba');
+    expect(sent.payload.text).toContain('NO probado');
+  });
+
   test('TAC desconocido lo dice y sugiere /revisar', async () => {
     const db = new FakeD1().when('SELECT brand, model, aka FROM tacs', { first: null });
     const bot = new SimpleTelegramBot(fakeEnv({ DB: db }));

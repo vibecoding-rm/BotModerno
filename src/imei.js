@@ -3,7 +3,8 @@
  * (Osmocom TAC database, CC BY-SA 3.0) y lo cruza con la base comunitaria.
  */
 import { logger } from './logger.js';
-import { escapeHtml, buildFtsQuery } from './format.js';
+import { escapeHtml, buildFtsQuery, cubaBandVerdict } from './format.js';
+import { lookupBands } from './search.js';
 
 // Solo dígitos; un IMEI usable tiene 14-16 dígitos (15 es el estándar)
 export function normalizeImei(text) {
@@ -124,7 +125,15 @@ export async function handleImei(bot, chatId, argStr) {
       } else {
         lines.push('');
         lines.push('🔎 Aún no hay experiencia de la comunidad con este modelo.');
-        lines.push('📲 ¿Lo probaste en Cuba? Aporta con /subir. Y revisa /bandas (la clave: LTE B3).');
+        lines.push('📲 ¿Lo probaste en Cuba? Aporta con /subir.');
+      }
+
+      // Estimado por bandas del modelo (device_bands): útil sobre todo cuando la
+      // comunidad aún no lo ha reportado. Best-effort.
+      const bandVerdict = cubaBandVerdict(await lookupBands(bot, `${row.brand} ${row.model}`));
+      if (bandVerdict) {
+        lines.push('');
+        lines.push(bandVerdict.text);
       }
     } else {
       // Registrar el TAC no encontrado: sirve para curar la base con datos reales de uso
