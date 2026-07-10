@@ -16,6 +16,7 @@ import { handleModCallback, drainPendingNotifications } from './moderation.js';
 import { handleExportCallback } from './export.js';
 import { startCaptchaAndWelcome, startCaptcha, handleCaptchaCallback, kickExpiredCaptchas } from './captcha.js';
 import { welcomeUserDM, handleWelcomeCallback, sendWithBanner } from './info.js';
+import { handleVoteCallback } from './votes.js';
 
 export class SimpleTelegramBot {
   constructor(env) {
@@ -272,6 +273,12 @@ export class SimpleTelegramBot {
         const offset = Number(parts[1]) || 0;
         const query = parts.slice(2).join(':');
         if (query) await searchByModel(this, chatId, query, offset, msg?.message_id);
+        return;
+      }
+
+      // Votos 👍/👎 por ficha (cualquiera puede votar en el grupo)
+      if (data.startsWith('vt:')) {
+        await handleVoteCallback(this, { id, data, msg, chatId, userId });
         return;
       }
 

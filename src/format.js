@@ -102,6 +102,7 @@ export function formatSearchResults(query, matches, offset, total) {
     const meta = [];
     if (r.bands.length) meta.push(`📶 ${escapeHtml(r.bands.join(', '))}`);
     if (r.provinces.length) meta.push(`📍 ${escapeHtml(r.provinces.join(', '))}`);
+    if (r.up || r.down) meta.push(`👍 ${r.up || 0} · 👎 ${r.down || 0}`);
     const lines = [head];
     if (meta.length) lines.push(`    ${meta.join(' · ')}`);
     if (r.observations) {

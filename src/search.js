@@ -5,8 +5,17 @@
  */
 import { logger } from './logger.js';
 import { normalizeText, buildFtsQuery, parsePhoneRow, formatSearchResults, escapeHtml } from './format.js';
+import { getVoteTallies } from './votes.js';
 
 const PAGE = 6;
+
+// Recorta un texto para caber en callback_data (límite 64 BYTES en UTF-8).
+function fitCallbackQuery(prefix, query) {
+  const enc = new TextEncoder();
+  let q = query;
+  while (q && enc.encode(prefix + q).length > 64) q = q.slice(0, -1);
+  return q;
+}
 
 async function ftsSearch(bot, query, offset) {
   const match = buildFtsQuery(query);
@@ -55,19 +64,38 @@ export async function searchByModel(bot, chatId, query, offset = 0, editMessageI
     }
 
     const matches = rows.map(parsePhoneRow);
+
+    // Conteo de votos 👍/👎 de esta página, adjuntado a cada ficha
+    const tallies = await getVoteTallies(bot, matches.map(m => m.id));
+    for (const m of matches) {
+      const t = tallies.get(Number(m.id));
+      m.up = t?.up || 0;
+      m.down = t?.down || 0;
+    }
+
     const msgText = formatSearchResults(query, matches, offset, total);
 
-    // Botones de paginación (callback data máx 64 BYTES: recortar query en UTF-8)
-    let qShort = query;
-    const enc = new TextEncoder();
-    while (qShort && enc.encode(`pg:${offset + PAGE}:${qShort}`).length > 64) {
-      qShort = qShort.slice(0, -1);
-    }
+    // callback_data ≤ 64 BYTES: recortar query en UTF-8 (el id/offset más largos van en el prefijo)
+    const maxId = Math.max(0, ...matches.map(m => Number(m.id) || 0));
+    const qShort = fitCallbackQuery(`vt:d:${maxId}:${offset}:`, query);
+
+    // Una fila de votos por ficha: [nombre] [👍 N] [👎 M]
+    const rowsKb = matches.map(m => {
+      const name = (m.commercial_name || m.model || '').slice(0, 24) || 'Ficha';
+      return [
+        { text: `📱 ${name}`, callback_data: `vt:i:${m.id}` },
+        { text: `👍 ${m.up}`, callback_data: `vt:u:${m.id}:${offset}:${qShort}` },
+        { text: `👎 ${m.down}`, callback_data: `vt:d:${m.id}:${offset}:${qShort}` },
+      ];
+    });
+
+    // Fila de paginación
     const to = offset + matches.length;
     const navRow = [];
     if (offset > 0) navRow.push({ text: '◀ Anterior', callback_data: `pg:${Math.max(0, offset - PAGE)}:${qShort}` });
     if (to < total) navRow.push({ text: 'Siguiente ▶', callback_data: `pg:${offset + PAGE}:${qShort}` });
-    const kb = navRow.length ? { inline_keyboard: [navRow] } : undefined;
+    if (navRow.length) rowsKb.push(navRow);
+    const kb = rowsKb.length ? { inline_keyboard: rowsKb } : undefined;
 
     if (editMessageId) {
       await bot.editMessageText(chatId, editMessageId, msgText, { reply_markup: kb, parse_mode: 'HTML' });
