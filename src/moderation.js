@@ -2,7 +2,7 @@
  * Cola de moderación (/pendientes, botones mod:) y notificaciones a admins/suscriptores.
  */
 import { logger } from './logger.js';
-import { parseJsonArray, escapeHtml } from './format.js';
+import { parseJsonArray, escapeHtml, normalizeText } from './format.js';
 import { kbModeration } from './keyboards.js';
 
 export function formatPhoneReview(p, pendingCount) {
@@ -73,6 +73,7 @@ export async function handleModCallback(bot, chatId, userId, data, msg) {
 
   if (action === 'approve') {
     await notifySubscribers(bot, phone);
+    await notifyWatchlist(bot, phone);
   }
 
   // Mostrar el siguiente pendiente automáticamente
@@ -95,6 +96,39 @@ export async function notifySubscribers(bot, phone) {
     ).bind(txt, new Date().toISOString()).run();
   } catch (e) {
     logger.error('notifySubscribers error', e);
+  }
+}
+
+// Notifica a usuarios que siguen este modelo con /seguir cuando se aprueba.
+// Borra el watchlist entry después de notificar (one-shot).
+export async function notifyWatchlist(bot, phone) {
+  try {
+    const name = phone.commercial_name || phone.model || '';
+    if (!name) return;
+    const normName = normalizeText(name);
+    const res = await bot.db.prepare("SELECT id, tg_id, query FROM watchlist").all();
+    const rows = (res.results || []).filter(r => normName.includes(r.query));
+    if (!rows.length) return;
+    const works = phone.works === 1 || phone.works === true ? '✅ funciona' : '❌ no funciona';
+    const txt = `🔔 <b>¡Encontrado!</b> Estabas siguiendo este modelo:\n\n` +
+      `📱 <b>${escapeHtml(phone.commercial_name)}</b>` +
+      (phone.model ? ` (${escapeHtml(phone.model)})` : '') +
+      `\n🇨🇺 ${works} en Cuba\n\n` +
+      `Usa /revisar ${escapeHtml(name)} para ver los detalles.`;
+    const ids = rows.map(r => Number(r.id));
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      await bot.db.prepare(
+        "INSERT INTO pending_notifications (tg_id, payload, created_at) VALUES (?1, ?2, ?3)"
+      ).bind(row.tg_id, txt, now).run();
+    }
+    if (ids.length) {
+      await bot.db.prepare(
+        `DELETE FROM watchlist WHERE id IN (${ids.join(',')})`
+      ).run();
+    }
+  } catch (e) {
+    logger.error('notifyWatchlist error', e);
   }
 }
 

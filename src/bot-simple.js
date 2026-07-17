@@ -9,7 +9,7 @@
 import { logger } from './logger.js';
 import { tgFetch } from './telegram.js';
 import { toCsvArray, escapeHtml } from './format.js';
-import { onCommand } from './commands.js';
+import { onCommand, handleUnfollow } from './commands.js';
 import { searchByModel, showPhoneDetail } from './search.js';
 import { handleWizardText, handleWizardCallback, handleProvincesCallback } from './wizard.js';
 import { handleModCallback, drainPendingNotifications } from './moderation.js';
@@ -324,6 +324,13 @@ export class SimpleTelegramBot {
 
       if (data.startsWith('wiz:')) {
         await handleWizardCallback(this, { id, data, msg, chatId, userId });
+        return;
+      }
+
+      if (data.startsWith('unfollow:')) {
+        await this.answerCallbackQuery(id);
+        const watchlistId = Number(data.split(':')[1]) || 0;
+        if (watchlistId) await handleUnfollow(this, chatId, userId, watchlistId, msg?.message_id);
         return;
       }
     } catch (e) {

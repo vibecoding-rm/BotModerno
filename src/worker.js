@@ -72,16 +72,21 @@ export default {
         drop_pending_updates: true
       });
       const publicCommands = [
-        { command: 'start', description: 'Bienvenida y menú principal' },
-        { command: 'revisar', description: 'Buscar un teléfono' },
-        { command: 'imei', description: 'Identificar teléfono por su IMEI' },
-        { command: 'subir', description: 'Proponer un teléfono' },
+        { command: 'revisar', description: 'Buscar un teléfono (ej: /revisar Samsung A14)' },
+        { command: 'imei', description: 'Identificar teléfono por su IMEI (*#06#)' },
+        { command: 'subir', description: 'Reportar tu experiencia con un teléfono' },
+        { command: 'top', description: 'Los teléfonos más confirmados por la comunidad' },
+        { command: 'marca', description: 'Ver teléfonos de una marca (ej: /marca Samsung)' },
+        { command: 'seguir', description: 'Recibir aviso cuando suban un modelo' },
+        { command: 'misseguimientos', description: 'Ver y cancelar tus seguimientos activos' },
         { command: 'bandas', description: 'Guía de bandas 4G en Cuba' },
-        { command: 'reglas', description: 'Ver las reglas' },
+        { command: 'stats', description: 'Estadísticas de la base de datos' },
         { command: 'exportar', description: 'Descargar la base de datos' },
+        { command: 'suscribir', description: 'Recibir avisos de todos los teléfonos nuevos' },
         { command: 'reportar', description: 'Reportar un error en los datos' },
-        { command: 'suscribir', description: 'Recibir avisos de novedades' },
-        { command: 'ayuda', description: 'Cómo usar el bot' },
+        { command: 'ayuda', description: 'Lista de comandos y cómo usar el bot' },
+        { command: 'start', description: 'Bienvenida y menú principal' },
+        { command: 'reglas', description: 'Ver las reglas' },
         { command: 'id', description: 'Ver tu ID de Telegram' }
       ];
       const setCommands = await tg('setMyCommands', { commands: publicCommands });

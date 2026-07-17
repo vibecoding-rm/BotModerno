@@ -3,12 +3,12 @@
  */
 import { logger } from './logger.js';
 import { escapeHtml } from './format.js';
-import { searchByModel } from './search.js';
+import { searchByModel, searchByBrand, showTopPhones } from './search.js';
 import { handleImei } from './imei.js';
 import { startWizard, cancelWizard } from './wizard.js';
 import { sendExportOptions } from './export.js';
 import { sendPendingReview } from './moderation.js';
-import { sendWelcomeMessage, sendRules, getShortRules, sendBandsGuide, sendHelp } from './info.js';
+import { sendWelcomeMessage, sendRules, getShortRules, sendBandsGuide, sendHelp, sendStats } from './info.js';
 
 export async function onCommand(bot, { chatId, chatType, userId, msg, text }) {
   const [cmd, ...args] = text.split(/\s+/);
@@ -106,6 +106,34 @@ export async function onCommand(bot, { chatId, chatType, userId, msg, text }) {
       await handleUnsubscribe(bot, chatId, userId);
       break;
     }
+    case '/top': {
+      await showTopPhones(bot, chatId);
+      break;
+    }
+    case '/marca': {
+      if (!argStr) {
+        await bot.sendMessage(chatId, '📝 Formato: /marca &lt;marca&gt;\n\nEjemplo: /marca Samsung');
+        return;
+      }
+      await searchByBrand(bot, chatId, argStr);
+      break;
+    }
+    case '/seguir': {
+      if (!argStr) {
+        await bot.sendMessage(chatId, '🔔 Formato: /seguir &lt;modelo&gt;\n\nEjemplo: /seguir Samsung A14\n\nTe avisaré cuando alguien lo suba a la base.');
+        return;
+      }
+      await handleFollow(bot, chatId, userId, argStr);
+      break;
+    }
+    case '/misseguimientos': {
+      await handleMyFollows(bot, chatId, userId);
+      break;
+    }
+    case '/stats': {
+      await sendStats(bot, chatId);
+      break;
+    }
     default: {
       if (chatType === 'private') {
         await bot.sendMessage(chatId, 'Usa /subir para iniciar el asistente.');
@@ -181,5 +209,89 @@ export async function handleUnsubscribe(bot, chatId, userId) {
   } catch (e) {
     logger.error('handleUnsubscribe error', e, { chatId, userId });
     await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo o /cancelar.');
+  }
+}
+
+async function handleFollow(bot, chatId, userId, query) {
+  try {
+    const normalized = query.trim().toLowerCase().slice(0, 100);
+    const existing = await bot.db.prepare(
+      "SELECT id FROM watchlist WHERE tg_id = ?1 AND query = ?2"
+    ).bind(String(userId), normalized).first();
+    if (existing) {
+      await bot.sendMessage(chatId,
+        `🔔 Ya estás siguiendo «${escapeHtml(query)}».\n` +
+        '💡 /misseguimientos para ver tus seguimientos activos.');
+      return;
+    }
+    const countRow = await bot.db.prepare(
+      "SELECT COUNT(*) AS n FROM watchlist WHERE tg_id = ?1"
+    ).bind(String(userId)).first();
+    if ((countRow?.n || 0) >= 5) {
+      await bot.sendMessage(chatId,
+        '⚠️ Ya tienes 5 seguimientos activos (el máximo).\n' +
+        'Usa /misseguimientos para cancelar alguno.');
+      return;
+    }
+    await bot.db.prepare(
+      "INSERT INTO watchlist (tg_id, query, created_at) VALUES (?1, ?2, ?3)"
+    ).bind(String(userId), normalized, new Date().toISOString()).run();
+    await bot.sendMessage(chatId,
+      `🔔 <b>Seguimiento activado</b> para «${escapeHtml(query)}».\n` +
+      'Te avisaré cuando alguien lo suba a la base.\n\n' +
+      '💡 /misseguimientos para ver todos tus seguimientos.');
+  } catch (e) {
+    logger.error('handleFollow error', e, { chatId, userId });
+    await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo.');
+  }
+}
+
+export async function handleMyFollows(bot, chatId, userId) {
+  try {
+    const res = await bot.db.prepare(
+      "SELECT id, query FROM watchlist WHERE tg_id = ?1 ORDER BY id"
+    ).bind(String(userId)).all();
+    const rows = res.results || [];
+    if (!rows.length) {
+      await bot.sendMessage(chatId,
+        '📭 No tienes seguimientos activos.\n\n' +
+        '💡 Usa /seguir &lt;modelo&gt; para que te avisen cuando alguien lo suba.');
+      return;
+    }
+    const kb = {
+      inline_keyboard: rows.map(r => [
+        { text: `❌ Dejar «${r.query.slice(0, 30)}»`, callback_data: `unfollow:${r.id}` }
+      ])
+    };
+    const list = rows.map((r, i) => `${i + 1}. ${escapeHtml(r.query)}`).join('\n');
+    await bot.sendMessage(chatId,
+      `🔔 <b>Tus seguimientos (${rows.length}/5)</b>\n\n${list}\n\n` +
+      'Pulsa para cancelar uno:',
+      { reply_markup: kb });
+  } catch (e) {
+    logger.error('handleMyFollows error', e, { chatId, userId });
+    await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo.');
+  }
+}
+
+export async function handleUnfollow(bot, chatId, userId, watchlistId, msgId) {
+  try {
+    const row = await bot.db.prepare(
+      "SELECT id, query, tg_id FROM watchlist WHERE id = ?1"
+    ).bind(watchlistId).first();
+    if (!row || String(row.tg_id) !== String(userId)) {
+      await bot.sendMessage(chatId, 'No encontré ese seguimiento o no es tuyo.');
+      return;
+    }
+    await bot.db.prepare("DELETE FROM watchlist WHERE id = ?1").bind(watchlistId).run();
+    const text = `✅ Dejaste de seguir «${escapeHtml(row.query)}».`;
+    if (msgId) {
+      await bot.editMessageText(chatId, msgId, text);
+    } else {
+      await bot.sendMessage(chatId, text);
+    }
+  } catch (e) {
+    logger.error('handleUnfollow error', e, { chatId, userId });
+    await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo.');
   }
 }

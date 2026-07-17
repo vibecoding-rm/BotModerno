@@ -6,6 +6,7 @@ import { EFFECTS } from './telegram.js';
 import { kbWelcome } from './keyboards.js';
 import { startWizard } from './wizard.js';
 import { sendExportOptions } from './export.js';
+import { escapeHtml } from './format.js';
 
 // Envía texto con el banner de portada si está configurado (caption tope 1024 chars)
 export async function sendWithBanner(bot, chatId, text, opts = {}) {
@@ -142,25 +143,41 @@ export function getShortRules() {
 
 export async function sendStats(bot, chatId) {
   try {
-    const counts = await bot.db.prepare(
-      "SELECT COUNT(*) AS total, SUM(CASE WHEN works=1 THEN 1 ELSE 0 END) AS works_yes, MAX(created_at) AS last FROM phones WHERE status = 'approved'"
-    ).first();
-    const pendingRow = await bot.db.prepare("SELECT COUNT(*) AS n FROM phones WHERE status = 'pending'").first();
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const eventsRow = await bot.db.prepare("SELECT COUNT(*) AS n FROM events WHERE created_at >= ?1").bind(cutoff).first();
+    const [counts, pendingRow, votesRow, brandsRes] = await Promise.all([
+      bot.db.prepare(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN works=1 THEN 1 ELSE 0 END) AS works_yes, MAX(created_at) AS last FROM phones WHERE status = 'approved'"
+      ).first(),
+      bot.db.prepare("SELECT COUNT(*) AS n FROM phones WHERE status = 'pending'").first(),
+      bot.db.prepare(
+        "SELECT COUNT(*) AS total, SUM(CASE WHEN vote=1 THEN 1 ELSE 0 END) AS up FROM phone_votes"
+      ).first(),
+      bot.db.prepare(
+        "SELECT SUBSTR(commercial_name, 1, INSTR(commercial_name || ' ', ' ') - 1) AS brand, COUNT(*) AS n FROM phones WHERE status = 'approved' AND commercial_name IS NOT NULL AND commercial_name != '' GROUP BY brand ORDER BY n DESC LIMIT 5"
+      ).all(),
+    ]);
 
     const total = counts?.total || 0;
     const worksYes = counts?.works_yes || 0;
     const worksNo = total - worksYes;
     const lastDate = counts?.last ? String(counts.last).slice(0, 10) : '—';
+    const totalVotes = votesRow?.total || 0;
+    const upVotes = votesRow?.up || 0;
+    const brands = (brandsRes.results || []).map(r => `${escapeHtml(r.brand)} (${r.n})`).join(' · ') || '—';
 
     const statsMessage = `📊 <b>Estadísticas de CubaModel</b>
 
-📱 Teléfonos aprobados: <b>${total}</b>
-    ✅ funcionan en Cuba: ${worksYes} · ❌ no funcionan: ${worksNo}
-⏳ En cola de revisión: ${pendingRow?.n || 0}
-🕐 Último aporte aprobado: ${lastDate}
-📈 Actividad en 24h: ${eventsRow?.n || 0} eventos
+📱 <b>Teléfonos aprobados: ${total}</b>
+    ✅ Funcionan en Cuba: ${worksYes}
+    ❌ No funcionan: ${worksNo}
+    ⏳ En revisión: ${pendingRow?.n || 0}
+
+🗓 Último aporte: ${lastDate}
+
+🏆 <b>Marcas más reportadas:</b>
+    ${brands}
+
+👍 <b>Votos de la comunidad: ${totalVotes}</b>
+    👍 A favor: ${upVotes} · 👎 En contra: ${totalVotes - upVotes}
 
 🌐 Base abierta y gratuita · proyecto comunitario · Cuba 🇨🇺
 💡 Súmate con /subir o descárgala con /exportar`;
@@ -196,22 +213,23 @@ export async function sendHelp(bot, chatId) {
   const helpMessage = `❓ <b>Ayuda - CubaModel Bot</b>
 
 🤖 <b>Comandos principales:</b>
-• /start - Mensaje de bienvenida
-• /subir - Agregar teléfono
-• /revisar &lt;modelo&gt; - Buscar teléfonos
+• /revisar &lt;modelo&gt; - Buscar teléfonos (ej: /revisar Samsung A14 en La Habana)
 • /imei &lt;número&gt; - Identificar teléfono por IMEI (<code>*#06#</code>)
+• /subir - Reportar tu experiencia con un teléfono
+• /top - Los teléfonos más confirmados por la comunidad
+• /marca &lt;marca&gt; - Ver todos los teléfonos de una marca
+• /seguir &lt;modelo&gt; - Recibir aviso cuando se suba ese modelo
+• /misseguimientos - Ver y cancelar tus seguimientos activos
 • /bandas - Guía de bandas 4G en Cuba
-• /reglas - Ver reglas completas
-• /exportar - Exportar base de datos
-• /suscribir - Recibir avisos de novedades
-• /id - Ver información de IDs
-• /reportar - Reportar problema
+• /stats - Estadísticas de la base de datos
+• /exportar - Descargar la base de datos
 
-<blockquote expandable>📱 <b>Cómo usar:</b>
-1. <b>Agregar teléfono:</b> Usa /subir en el grupo y sigue los pasos
-2. <b>Buscar teléfonos:</b> Usa /revisar Samsung A14
-3. <b>Ver reglas:</b> Usa /reglas
-4. <b>Exportar datos:</b> Usa /exportar y elige el formato
+<blockquote expandable>📱 <b>Más comandos:</b>
+• /start - Mensaje de bienvenida
+• /reglas - Ver reglas completas
+• /suscribir - Recibir avisos de todos los teléfonos nuevos
+• /reportar - Reportar un error en los datos
+• /id - Ver tu ID de Telegram
 
 🔧 <b>Para administradores:</b>
 • /pendientes - Revisar propuestas pendientes (aprobar/rechazar)

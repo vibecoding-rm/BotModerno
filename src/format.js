@@ -255,8 +255,22 @@ export function formatPhoneDetail(r, tally = { up: 0, down: 0 }, bandVerdict = n
   return lines.join('\n');
 }
 
+// Ranking /top — lista compacta de los más votados/confirmados
+export function formatTop(rows) {
+  if (!rows.length) return '📊 Todavía no hay suficientes reportes para armar un ranking. ¡Sé el primero con /subir!';
+  const lines = rows.map((r, i) => {
+    const w = r.works === true ? '✅' : (r.works === false ? '❌' : '❓');
+    const name = escapeHtml(r.commercial_name || r.model || '—');
+    const votes = r.up ? ` · 👍 ${r.up}` : '';
+    return `${i + 1}. ${w} <b>${name}</b>${votes}`;
+  });
+  return '🏆 <b>Top teléfonos en Cuba</b>\n\nLos más confirmados por la comunidad:\n\n' +
+    lines.join('\n') +
+    '\n\n💡 Vota en las fichas de /revisar para actualizar este ranking.';
+}
+
 // Página de resultados de /revisar: compacto, nombre en negrita, solo campos con datos (HTML)
-export function formatSearchResults(query, matches, offset, total) {
+export function formatSearchResults(query, matches, offset, total, { province } = {}) {
   const from = offset + 1;
   const to = offset + matches.length;
   const blocks = matches.map(r => {
@@ -283,7 +297,8 @@ export function formatSearchResults(query, matches, offset, total) {
   });
   let legend = '✅ funciona en Cuba · ❌ no funciona';
   if (matches.some(r => r.works !== true && r.works !== false)) legend += ' · ❓ sin confirmar';
-  return `🔎 Resultados para «${escapeHtml(query)}» · ${from}–${to} de ${total}\n\n` +
+  const provNote = province ? ` en <b>${escapeHtml(province)}</b>` : '';
+  return `🔎 Resultados para «${escapeHtml(query)}»${provNote} · ${from}–${to} de ${total}\n\n` +
     blocks.join('\n\n') +
     `\n\n──────────────\n${legend}`;
 }
