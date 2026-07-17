@@ -129,17 +129,16 @@ describe('cubaBandVerdict', () => {
     expect(v.text).toContain('NO lo ha probado');
     expect(v.short).toContain('✅ Sí sirve');
   });
-  test('sin B3 pero con B1/B28 -> a medias, nombra las frecuencias', () => {
+  test('sin B3 (aunque traiga B1/B28) -> NO hay 4G en Cuba', () => {
+    // ETECSA da 4G HOY solo con B3 (1800); B1/B28 no están desplegadas
     const v = cubaBandVerdict({ bands_4g: '1, 2, 4, 28' });
-    expect(v.level).toBe('partial');
-    expect(v.text).toContain('solo en algunas zonas');
-    expect(v.text).toContain('B1 (2100 MHz)');
-    expect(v.text).toContain('B28 (700 MHz)');
-    expect(v.short).toContain('Sirve a medias');
+    expect(v.text).toContain('Internet 4G: NO');
+    expect(v.text).toContain('B3 (1800 MHz)');
+    expect(v.short).not.toContain('4G');
   });
   test('4G no compatible pero con 2G/3G lo dice claro', () => {
     const v = cubaBandVerdict({ bands_4g: '2, 4, 5, 12', bands_3g: 'HSDPA 850 / 1900 / 2100', bands_2g: 'GSM 850 / 900' });
-    expect(v.level).toBe('none');
+    expect(v.level).toBe('partial'); // sirve para llamadas/3G aunque no 4G
     expect(v.text).toContain('Internet 4G: NO');
     expect(v.text).toContain('Llamadas, SMS e internet básico: SÍ');
     expect(v.short).toContain('Solo llamadas y 3G');
