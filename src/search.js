@@ -73,7 +73,7 @@ export async function showTopPhones(bot, chatId) {
       ORDER BY up DESC, p.commercial_name ASC
       LIMIT 15
     `).all();
-    await bot.sendMessage(chatId, formatTop(res.results || []), { parse_mode: 'HTML' });
+    await bot.sendMessage(chatId, formatTop((res.results || []).map(parsePhoneRow)), { parse_mode: 'HTML' });
   } catch (e) {
     logger.error('showTopPhones error', e, { chatId });
     await bot.sendMessage(chatId, 'Se enredó la cosa 😅. Intenta de nuevo.');
