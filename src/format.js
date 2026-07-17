@@ -176,16 +176,55 @@ export function formatBandEstimates(query, rows) {
       + (v ? v.text : 'No tengo datos de bandas de este equipo.')
       + '\n\n📲 ¿Lo tienes en la mano? Confírmalo con /subir para que quede probado.';
   }
-  // Varios: lista con el titular corto de cada uno.
-  const blocks = rows.map(r => {
-    const v = cubaBandVerdict(r);
-    const name = `${r.oem || ''} ${r.model || ''}`.trim();
-    return `📱 <b>${escapeHtml(name)}</b>` + (v ? `\n    ${v.short}` : '');
-  });
-  return `🔎 Nadie de la comunidad ha reportado «${escapeHtml(query)}» todavía.\n\n` +
-    '📊 <b>Estimado por las bandas</b> (no es un teléfono probado en Cuba):\n\n' +
-    blocks.join('\n\n') +
-    '\n\n⚠️ Es un cálculo por las specs. Busca el modelo exacto para ver el detalle, y /subir para confirmarlo.';
+
+  // Varios: agrupar por veredicto y mostrar una respuesta compacta.
+  // Prefiere variante "Global" o la de nombre más corto como representante.
+  function pickRep(items) {
+    const g = items.find(({ r }) => /global/i.test(r.model || ''));
+    return g || items.reduce((a, b) => (a.r.model || '').length <= (b.r.model || '').length ? a : b);
+  }
+
+  const withV = rows.map(r => ({ r, v: cubaBandVerdict(r) }));
+  const buckets = { ok: [], partial: [], none: [] };
+  for (const item of withV) {
+    const lv = item.v ? item.v.level : 'none';
+    (buckets[lv] || buckets.none).push(item);
+  }
+  const total = rows.length;
+  const header = `🔎 Nadie de la comunidad ha reportado «${escapeHtml(query)}» todavía.\n\n` +
+    '📊 <b>Estimado por las bandas</b> (no es un teléfono probado en Cuba):';
+
+  // Si todos dan el mismo veredicto: un solo bloque claro + nota de variantes.
+  const oneBucket = [buckets.ok, buckets.partial, buckets.none].find(b => b.length === total);
+  if (oneBucket) {
+    const { r, v } = pickRep(oneBucket);
+    const note = total > 1 ? `\n\n📋 Revisamos ${total} variantes de este modelo — todas con el mismo resultado.` : '';
+    return header + '\n\n' +
+      (v ? v.text : 'No tenemos datos de bandas de este equipo.') + note +
+      '\n\n📲 ¿Lo tienes en la mano? Confírmalo con /subir.';
+  }
+
+  // Veredictos mixtos: desglose compacto por bucket.
+  const lines = [];
+  if (buckets.ok.length) {
+    const { r } = pickRep(buckets.ok);
+    const ex = escapeHtml(`${r.oem} ${r.model}`.trim());
+    lines.push(`✅ Sí sirve: ${buckets.ok.length} variante${buckets.ok.length > 1 ? 's' : ''} — ej. ${ex}`);
+  }
+  if (buckets.partial.length) {
+    const { r } = pickRep(buckets.partial);
+    const ex = escapeHtml(`${r.oem} ${r.model}`.trim());
+    lines.push(`🟡 Solo llamadas/3G: ${buckets.partial.length} variante${buckets.partial.length > 1 ? 's' : ''} — ej. ${ex}`);
+  }
+  if (buckets.none.length) {
+    const { r } = pickRep(buckets.none);
+    const ex = escapeHtml(`${r.oem} ${r.model}`.trim());
+    lines.push(`❌ No sirve: ${buckets.none.length} variante${buckets.none.length > 1 ? 's' : ''} — ej. ${ex}`);
+  }
+  return header + ' (varía según la variante)\n\n' +
+    lines.join('\n') +
+    '\n\n⚠️ El resultado depende de la variante exacta que tengas. Busca el modelo preciso o mira /bandas.' +
+    '\n📲 ¿Lo probaste en Cuba? Confirma con /subir.';
 }
 
 // Ficha individual de un teléfono (vista de detalle con votos). Nombre completo,

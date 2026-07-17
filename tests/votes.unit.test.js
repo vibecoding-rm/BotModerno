@@ -1,7 +1,7 @@
 // tests/votes.unit.test.js — votos 👍/👎 por ficha (toggle + conteo)
 import { getVoteTallies, handleVoteCallback } from '../src/votes.js';
 import { showPhoneDetail, searchByModel } from '../src/search.js';
-import { cubaBandVerdict, normDeviceName } from '../src/format.js';
+import { cubaBandVerdict, normDeviceName, formatBandEstimates } from '../src/format.js';
 import { SimpleTelegramBot } from '../src/bot-simple.js';
 import { fakeEnv, FakeD1, stubTelegramFetch } from './helpers/fakes.js';
 
@@ -159,5 +159,53 @@ describe('normDeviceName', () => {
   test('normaliza para el cruce (minúsculas, sin símbolos, sin acentos)', () => {
     expect(normDeviceName('Samsung Galaxy A02s')).toBe('samsung galaxy a02s');
     expect(normDeviceName('Nothing Phone (4b) 5G')).toBe('nothing phone 4b 5g');
+  });
+});
+
+describe('formatBandEstimates — multi-variante', () => {
+  const b3row = { oem: 'Samsung', model: 'Galaxy S23 5G Global', bands_2g: 'GSM 900', bands_3g: 'UMTS 900 / 2100', bands_4g: 'LTE B1, B3, B7, B28' };
+  // sin 2G/3G de ETECSA ni B3 → veredicto 'none' (no sirve)
+  const noB3row = { oem: 'Samsung', model: 'Galaxy S23 5G US', bands_2g: 'GSM 850 / 1900', bands_3g: 'UMTS 850 / 1900', bands_4g: 'LTE B2, B5, B12' };
+  const calls3G = { oem: 'Samsung', model: 'Galaxy S23 FE 3G', bands_2g: 'GSM 900', bands_3g: 'UMTS 900 / 2100', bands_4g: '' };
+
+  test('todas ok → un solo veredicto + nota de variantes', () => {
+    const variants = [
+      { ...b3row, model: 'Galaxy S23 5G CA' },
+      b3row,
+      { ...b3row, model: 'Galaxy S23 5G KR' },
+    ];
+    const t = formatBandEstimates('samsung galaxy s23', variants);
+    expect(t).toContain('Internet 4G: SÍ');
+    expect(t).toContain('Revisamos 3 variantes');
+    expect(t).not.toContain('📱');
+  });
+
+  test('preferencia por variante Global como representante', () => {
+    const variants = [
+      { ...b3row, model: 'Galaxy S23 5G CA' },
+      b3row, // este tiene "Global" en el nombre
+    ];
+    const t = formatBandEstimates('samsung galaxy s23', variants);
+    // el veredicto debe ser del Global (B3), no del CA
+    expect(t).toContain('Internet 4G: SÍ');
+  });
+
+  test('veredictos mixtos → desglose compacto por bucket', () => {
+    const t = formatBandEstimates('samsung galaxy s23', [b3row, noB3row]);
+    expect(t).toContain('Sí sirve: 1 variante');
+    expect(t).toContain('No sirve: 1 variante');
+    expect(t).not.toContain('Revisamos');
+  });
+
+  test('mixto ok + partial → desglose correcto', () => {
+    const t = formatBandEstimates('samsung galaxy s23', [b3row, calls3G]);
+    expect(t).toContain('Sí sirve: 1 variante');
+    expect(t).toContain('Solo llamadas/3G: 1 variante');
+  });
+
+  test('1 fila → desglose completo (sin nota de variantes)', () => {
+    const t = formatBandEstimates('galaxy s23', [b3row]);
+    expect(t).toContain('¿Funcionaría en Cuba?');
+    expect(t).not.toContain('Revisamos');
   });
 });

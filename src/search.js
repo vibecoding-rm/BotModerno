@@ -31,7 +31,7 @@ async function bandsFallback(bot, chatId, query) {
   if (!nn) return false;
   try {
     const res = await bot.db.prepare(
-      'SELECT oem, model, bands_2g, bands_3g, bands_4g FROM device_bands WHERE norm_name LIKE ?1 GROUP BY norm_name ORDER BY LENGTH(norm_name) LIMIT 6'
+      'SELECT oem, model, bands_2g, bands_3g, bands_4g FROM device_bands WHERE norm_name LIKE ?1 GROUP BY norm_name ORDER BY LENGTH(norm_name) LIMIT 20'
     ).bind('%' + nn + '%').all();
     const rows = res.results || [];
     if (!rows.length) return false;
